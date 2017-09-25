@@ -61,7 +61,7 @@ class idigbio:
             # If not exists import it straight, if it does replace matching docs in mongo
             # Returns 3 possible flags: new | modified | static
             # TODO only update specific fields? Or just overwrite in mongo?
-            collectionStatus = checkIDBCollectionStatus(collectionKey, collectionModified, collectionSize)
+            collectionStatus = monogoConnect.checkIDBCollectionStatus(collectionKey, collectionModified, collectionSize)
 
             if collectionStatus == 'static':
                 continue
