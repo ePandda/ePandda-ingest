@@ -13,6 +13,7 @@ import sys
 import json
 import datetime
 import argparse
+import logging
 
 # import/ingest dependencies
 import urllib2
@@ -25,6 +26,7 @@ from sources import paleobio
 
 # Helper functions for managing ingest
 from helpers import ingestHelpers
+from helpers import logHelpers
 
 def main():
 
@@ -34,7 +36,11 @@ def main():
     ingestSources = args.sources
     dryRun = args.dryRun
     testRun = args.test
+    logLevel = args.logLevel
 
+    # Create the log
+    logger = logHelpers.createLog('ingest', logLevel)
+    logger.info("Starting ePandda ingest")
     # Source classes
     idb = idigbio.idigbio()
     pbdb = paleobio.paleobio()
@@ -43,6 +49,7 @@ def main():
     try:
         for ingestSource in ingestSources:
             if ingestSource not in sourceNames:
+                logger.error("Invalid source provided: " + ingestSource)
                 raise
     except:
         print "An invalid source database was provided. The following databases"\
@@ -53,6 +60,7 @@ def main():
 
     for ingestSource in ingestSources:
         ingester = sourceNames[ingestSource]
+        logger.info("Starting import for: " + ingestSource)
         outcome = ingester.runIngest(dry=dryRun, test=testRun)
         print outcome
 
