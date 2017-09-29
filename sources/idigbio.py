@@ -58,7 +58,7 @@ class idigbio:
             collectionModified = collection.lastmodified.string
             collectionSize = collection.size.string
             # Skip these collections
-            if '.eml' in collectionKey or 'idigbio' in collectionKey:
+            if '.eml' in collectionKey or 'idigbio' in collectionKey or '.png' in collectionKey:
                 self.logger.info("This idigbio collection cannot be imported: " + collectionKey)
                 continue
 
