@@ -93,15 +93,13 @@ class idigbio:
                 fullImportResult = mongoConn.iDBFullImport(occurrenceFile, collectionKey, collectionModified)
                 if fullImportResult is False:
                     self.logger.error("Import of " + collectionKey + " Failed")
-                    continue
-                self.logger.info("Imported " + collectonKey)
+                self.logger.info("Imported " + collectionKey)
             elif collectionStatus == 'modified' and dryRun is False:
                 self.logger.info("Doing partial import of " + collectionKey)
                 partialImportResult = mongoConn.iDBPartialImport(occurrenceFile, collectionKey, collectionModified)
                 if partialImportResult is False:
                     self.logger.error("There were at least some errors during import of " + collectionKey)
                     print "Imported with at least some errors"
-                    continue
                 else:
                     self.logger.info("Updated records in " + collectionKey)
 
@@ -145,7 +143,6 @@ class idigbio:
             if check not in occurrenceHeadList:
                 self.logger.error(occurrenceFile + "is not a valid CSV or TXT. Check source collection for validity")
                 self.logger.debug("Header list for invalid file: " + str(occurrenceHeadList))
-                os.remove(collectionKey)
                 return None
         duplicateHeaders = csvDuplicateHeaderCheck(occurrenceFile)
         if duplicateHeaders:
