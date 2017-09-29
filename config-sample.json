@@ -8,5 +8,6 @@
   "pbdb_db": "[pbdb_db]",
   "endpoints_db": "[destination_db]",
   "idigbio_coll": "[idigbio_collection]",
-  "pbdb_coll": "[pbdb_collection]"
+  "pbdb_coll": "[pbdb_collection]",
+  "pbdb_ingest_interval": "[date_time_string]"
 }

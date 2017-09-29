@@ -61,37 +61,111 @@ class mongoConnect:
 
     def iDBPartialImport(self, occurrenceFile, collectionKey, collectionModified):
         occCollection = self.idigbio[self.config['idigbio_db']]
-        with open(occurrenceFile, 'rb') as occCSV:
-            occReader = csv.reader(occCSV)
-            uuids = []
-            occHashes = {}
+        with open(occurrenceFile, 'rb') as csvFile:
+            reader = csv.reader(csvFile)
+            recordIds = []
+            recordHashes = {}
             rowCount = 0
-            for row in occReader:
-                idbUUID = row['idigbio:uuid']
-                occHash = ingestHelpers.getMd5Hash(row)
-                occHashes[idbUUID] = {'hash': occHash, 'row': rowCount}
-                uuids.append(idbUUID)
-                rowCount += 1
-            occRecs = occCollection.find({'idigbio:uuid': {'$in': uuids}}, {'_id': 0})
-            bulk = occCollection.initialize_unordered_bulk_op()
-            for occ in occRecs:
-                checkUUID = occ['idigbio:uuid']
-                if checkUUID in occHashes:
-                    checkHash = ingestHelpers.getMd5Hash(occ)
-                    if occHashes[checkUUID]['hash'] != checkHash:
-                        bulk.find({'idigbio:uuid': checkUUID}).upsert().update({'$set': occReader[occHashes[checkUUID]['row']]})
-                else:
-                    bulk.insert(occReader[occHashes[checkUUID]['row']])
+            bulkCount = 0
+            importError = False
+            importResult = generalPartialImport(reader, 'csv', 'idigbio:uuid', occCollection)
+            if importResult is False:
+                self.logger.warning("There were errors with this partial import, check the log above")
+                return False
 
+        return True
+
+    def pbdbIngestTmpCollections(self, csvFiles):
+        for csvFile in csvFiles:
+            collectionName = 'tmp_' + csvFile[:-4]
+            importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', collectionName, '--type', 'csv', '--file', csvFile, '--headerline', '--drop'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+            out, err = importCall.communicate()
+            if importCall.returncode != 0:
+                self.logger.error("mongoimport failed with error: " + err)
+                return False
+            else:
+                self.logger.info("mongoimport success! " + out)
+                return True
+
+    def pbdbMergeTmpCollections(self, occurrence, collection, reference):
+        self.logger.debug("Getting unique collection_no values from occurrences")
+        occurrenceCollection = self.pbdb[occurrence]
+        collectionCollection = self.pbdb[collection]
+        referenceCollection = self.pbdb[reference]
+
+        # Creating a few basic indexes speeds this process up
+        occurrenceCollection.create_index("collection_no")
+        occurrenceCollection.create_index("reference_no")
+        collectionCollection.create_index("collection_no")
+        referenceCollection.create_index("reference_no")
+
+        self.logger.info("Merging occurrences and collections")
+        collectionNos = occurrenceCollection.distinct('collection_no')
+        for collectionNo in collectionNos:
+            collectionData = collectionCollection.find_one({'collection_no': collectionNo})
+            if not collectionData:
+                self.logger.error("Could not find collection_no: " + str(collectionNo))
+            self.logger.debug("Adding collection data for collection_no: " + str(collectionNo))
+            occurrenceCollection.update_many({'collection_no': collection_no}, {'$addToSet': {'coll_refs': collectionData}})
+
+        self.logger.info("Merging occurrences and references")
+        referenceNos = occurrenceCollection.distinct('reference_no')
+        for referenceNo in referenceNos:
+            referenceData = referenceCollection.find_one({'reference_no': referenceNo})
+            if not referenceData:
+                self.logger.error("Could not find reference_no: " + str(referenceNo))
+            self.logger.debug("Adding collection data for collection_no: " + str(referenceNo))
+            occurrenceCollection.update_many({'reference_no': reference_no}, {'$addToSet': {'occ_refs': referenceData}})
+
+        return True
+
+    def pbdbMergeNewData(self, tmp_occurrence):
+        self.logger.info("Merging new PaleoBio data")
+        newOccurrences = self.pbdb[tmp_occurrence]
+        allOccurrences = self.pbdb[self.config['pbdb_coll']]
+        newData = newOccurrences.find()
+        mergeResult = generalPartialImport(newData, 'mongo', 'occurrence_no', allOccurrences)
+        return mergeResult
+
+    def generalPartialImport(self, reader, sourceType, idField, mongoCollection):
+        for row in reader:
+            recordId = row[idField]
+            rowHash = ingestHelpers.getMd5Hash(row)
+            recordHashes[recordId] = {'hash': rowHash, 'row': rowCount}
+            recordIds.append(recordId)
+            rowCount += 1
+            if rowCount % 500 == 0:
+                self.logger.info("Batch importing 500 records")
+                bulkCount += 1
+                mongoRecords = mongoCollection.find({idField: {'$in': recordIds}}, {'_id': 0})
+                bulk = mongoCollection.initialize_unordered_bulk_op()
+                for record in mongoRecords:
+                    checkRecordId = record[idField]
+                    if checkRecordId in recordHashes:
+                        checkHash = ingestHelpers.getMd5Hash(record)
+                        if recordHashes[checkRecordId]['hash'] != checkHash:
+                            bulk.find({idField: checkUUID}).upsert().update({'$set': reader[recordHashes[checkRecordId]['row']]})
+                    else:
+                        bulk.insert(occReader[recordHashes[checkRecordId]['row']])
+                try:
+                    bulk_results = bulk.execute()
+                    self.logger.debug(bulk_results)
+                except BulkWriteError as bwe:
+                    self.logger.error("Partial import bulk failure in Batch" + str(bulkCount) + "!")
+                    self.logger.error(bwe.details)
+                    importError = True
+                except InvalidOperation as io:
+                    self.logger.info("There were no records to update in Batch " + str(bulkCount))
+        if rowCount % 500 != 0:
+            bulkCount += 1
             try:
                 bulk_results = bulk.execute()
+                self.logger.debug(bulk_results)
             except BulkWriteError as bwe:
-                self.logger.error("Partial import bulk failure!")
+                self.logger.error("Partial import bulk failure in Batch" + str(bulkCount) + "!")
                 self.logger.error(bwe.details)
-                return False
+                importError = True
             except InvalidOperation as io:
-                self.logger.warning("There were no records to update")
-                return False
-            return bulk_results
+                self.logger.info("There were no records to update in Batch " + str(bulkCount))
 
-        return False
+        return importError

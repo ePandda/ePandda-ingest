@@ -98,18 +98,17 @@ class idigbio:
             elif collectionStatus == 'modified' and dryRun is False:
                 self.logger.info("Doing partial import of " + collectionKey)
                 partialImportResult = mongoConn.iDBPartialImport(occurrenceFile, collectionKey, collectionModified)
-                if not partialImportResult:
+                if partialImportResult is False:
                     self.logger.error("There were at least some errors during import of " + collectionKey)
                     print "Imported with at least some errors"
                     continue
                 else:
                     self.logger.info("Updated records in " + collectionKey)
-                    self.logger.debug(partialImportResult)
 
     		# Once we're done delete the ZIP and directory and move on to the next!
             self.logger.debug("Deleting " + collectionKey + " & " + collectionDir)
-    		os.remove(collectionKey)
-    		shutil.rmtree(collectionDir)
+            os.remove(collectionKey)
+            shutil.rmtree(collectionDir)
 
     def downloadCollection(self, collectionRoot, collectionKey):
         self.logger.debug("Downloading collection " + collectionKey)

@@ -62,8 +62,11 @@ def main():
         ingester = sourceNames[ingestSource]
         logger.info("Starting import for: " + ingestSource)
         outcome = ingester.runIngest(dry=dryRun, test=testRun)
-        print outcome
+        if outcome is False:
+            logger.error("Import of " + ingestSource + " failed! Review full log")
+        logger.info("Import of " + ingestSource + " successful!")
 
+    logger.info("Ingest Complete")
 
 if __name__ == '__main__':
     main()

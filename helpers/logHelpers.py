@@ -7,9 +7,12 @@
 import logging
 import time
 
-def createLog(module, level="WARNING"):
+def createLog(module, level):
     logger = logging.getLogger(module)
-    checkLevel = level.lower()
+    if level:
+        checkLevel = level.lower()
+    else:
+        checkLevel = 'warning'
     levels = {'debug': logging.DEBUG, 'info': logging.INFO, 'warning': logging.WARNING, 'error': logging.ERROR, 'critical': logging.CRITICAL}
     today = time.strftime("%Y_%m_%d")
     loggerFile = './logs/'+today+"_ingest.log"
