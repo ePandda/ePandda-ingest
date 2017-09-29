@@ -147,4 +147,7 @@ class idigbio:
                 self.logger.debug("Header list for invalid file: " + str(occurrenceHeadList))
                 os.remove(collectionKey)
                 return None
+        duplicateHeaders = csvDuplicateHeaderCheck(occurrenceFile)
+        if duplicateHeaders:
+            csvRenameDuplicateHeaders(occurrenceFile, duplicateHeaders)
         return occurrenceFile

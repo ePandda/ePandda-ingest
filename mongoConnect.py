@@ -77,6 +77,11 @@ class mongoConnect:
 
     def pbdbIngestTmpCollections(self, csvFiles):
         for csvFile in csvFiles:
+            # Checking for duplicate headers
+            duplicateHeaders = csvDuplicateHeaderCheck(csvFile)
+            if duplicateHeaders:
+                self.logger.info("Removing duplicate header values from " + csvFile)
+                csvRenameDuplicateHeaders(csvFile, duplicateHeaders)
             collectionName = 'tmp_' + csvFile[:-4]
             importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', collectionName, '--type', 'csv', '--file', csvFile, '--headerline', '--drop'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
             out, err = importCall.communicate()

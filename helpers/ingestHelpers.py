@@ -2,10 +2,14 @@
 # Helpers for ePandda ingest process
 #
 import os
+import shutil
 from importlib import import_module
 import argparse
 import json
 import hashlib
+import pandas as pd
+from tempfile import NamedTemporaryFile
+import csv
 
 def getSourceNames(sources):
     sourceNames = {}
@@ -27,3 +31,32 @@ def getMd5Hash(dict):
     # for the same data
     md5 = hashlib.md5(json.dumps(dict, sort_keys=True)).hexdigest()
     return md5
+
+def csvDuplicateHeaderCheck(csvFile):
+    occurrenceHeader = pd.read_csv(csvFile, sep=",", nrows=1)
+    occurrenceHeadList = list(occurrenceHeader.columns.values)
+    duplicateHeaders =
+    for header in occurrenceHeadList:
+        if occurrenceHeadList.count(header) > 1:
+            if header in duplicateHeaders:
+                continue
+            duplicateHeaders.append(header)
+    return duplicateHeaders
+
+def csvRenameDuplicateHeaders(csvFile, duplicateHeaders):
+    tempfile = NamedTemporaryFile(delete=False)
+    with open(csvFile, 'rb') as csvFile, tempfile:
+        reader = csv.reader(csvFile)
+        writer = csv.writer(tempfile)
+        rowCount = 0
+        for row in reader:
+            if rowCount == 0:
+                for duplicate in duplicateHeaders:
+                    dupCount = 0
+                    for i in range(len(row)):
+                        dupCount += 1
+                        if row[i] == duplicate:
+                            row[i] = duplicate + str(i)
+            writer.writerow(row)
+    shutil.move(tempfile.name, csvFile)
+    return True

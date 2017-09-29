@@ -41,19 +41,22 @@ class paleobio:
         if downloadResults is False:
             self.logger.error("A download failed! Ingest halted")
             return False
-        self.logger.info("Completed idigbio download")
+        self.logger.info("Completed paleobio download")
 
         # open a mongo connection
         mongoConn = mongoConnect.mongoConnect()
-
+        downloadedFiles = ['occurrence.csv', 'collection.csv', 'reference.csv']
         # Ingest records into temporary mongo collections for easier merging
         self.logger.info("Creating ingest collections")
-        tmpCollectionResults = mongoConn.pbdbIngestTmpCollections(['occurrence.csv', 'collection.csv', 'reference.csv'])
-        if collectionResults is False:
+        tmpCollectionResults = mongoConn.pbdbIngestTmpCollections(downloadedFiles)
+        if tmpCollectionResults is False:
             self.logger.error("Could not create all necessary mongo collections. Halting")
             return False
         self.logger.info("Created PaleoBio temporary collections")
 
+        for csvFile in downloadedFiles:
+            os.remove(csvFile)
+            self.logger.debug("Deleted source file: " + csvFile)
         # Merge collections and references into occurrence collection
         self.logger.info("Merging temporary collections")
         mergeResult = mongoConn.pbdbMergeTmpCollections('tmp_occurrence', 'tmp_collection', 'tmp_references')
