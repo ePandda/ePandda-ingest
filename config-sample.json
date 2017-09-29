@@ -1,0 +1,12 @@
+{
+  "auth_secret": "[secretkey]",
+  "mongodb_host": "mongohost:port",
+  "mongodb_user": "[mongo_user]",
+  "mongodb_password": "[mongo_pw]",
+  "version": 1.0,
+  "idigbio_db": "[idigbio_db]",
+  "pbdb_db": "[pbdb_db]",
+  "endpoints_db": "[destination_db]",
+  "idigbio_coll": "[idigbio_collection]",
+  "pbdb_coll": "[pbdb_collection]"
+}
