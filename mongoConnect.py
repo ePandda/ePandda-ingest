@@ -60,19 +60,19 @@ class mongoConnect:
         return True
 
     def iDBPartialImport(self, occurrenceFile, collectionKey, collectionModified):
-        occCollection = self.idigbio[self.config['idigbio_db']]
-        with open(occurrenceFile, 'rb') as csvFile:
-            reader = csv.reader(csvFile)
-            recordIds = []
-            recordHashes = {}
-            rowCount = 0
-            bulkCount = 0
-            importError = False
-            importResult = generalPartialImport(reader, 'csv', 'idigbio:uuid', occCollection)
-            if importResult is False:
-                self.logger.warning("There were errors with this partial import, check the log above")
-                return False
-
+        importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['idigbio_db'], '-c', self.config['idigbio_coll'], '--type', 'csv', '--file', occurrenceFile, '--headerline', '--mode', 'upsert', '--upsertFields', 'idigbio:uuid'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        out, err = importCall.communicate()
+        if importCall.returncode != 0:
+            self.logger.error("mongoimport failed with error: " + err)
+            return False
+        else:
+            self.logger.info("mongoimport success! " + out)
+        collCollection = self.idigbio.collectionStatus
+        updateStatus = collCollection.update({'collection': collectionKey}, {'$set': {'collection': collectionKey, 'modifiedDate': collectionModified}}, upsert=True)
+        if collCollection:
+            self.logger.debug("Added/updated collection entry in collectionStatus for " + collectionKey)
+        else:
+            self.logger.warning("Failed to update this record in collectionStatus: " + collectionKey)
         return True
 
     def pbdbIngestTmpCollections(self, csvFiles):
@@ -121,12 +121,30 @@ class mongoConnect:
 
     def pbdbMergeNewData(self, tmp_occurrence):
         self.logger.info("Merging new PaleoBio data")
-        newOccurrences = self.pbdb[tmp_occurrence]
-        allOccurrences = self.pbdb[self.config['pbdb_coll']]
-        newData = newOccurrences.find()
-        mergeResult = generalPartialImport(newData, 'mongo', 'occurrence_no', allOccurrences)
+
+        self.logger.debug("Exporting contents of temporary collection")
+        exportCall = Popen(['mongoexport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', tmp_occurrence, '--type', 'json', '-o', 'tmp_occurrence.json'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        out, err = exportCall.communicate()
+        if exportCall.returncode != 0:
+            self.logger.error("mongoexport failed with error: " + err)
+            return False
+        else:
+            self.logger.debug("Successfully exported temp mongo collection! " + out)
+
+        self.logger.debug("Importing new contents of temporary collection with upsert")
+        importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', self.config['pbdb_coll'], '--type', 'json', '--file', 'tmp_occurrence.json', '--mode', 'upsert', '--upsertFields', 'occurrence_no'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        out, err = importCall.communicate()
+        if importCall.returncode != 0:
+            self.logger.error("mongoimport failed with error: " + err)
+            return False
+        else:
+            self.logger.info("mongoimport success! " + out)
+            return True
         return mergeResult
 
+
+    # This method is going to be deprecated as unecessary!
+    # TODO DELETE once confirmed that we can just use upsert on records
     def generalPartialImport(self, reader, sourceType, idField, mongoCollection):
         for row in reader:
             recordId = row[idField]
