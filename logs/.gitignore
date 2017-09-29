@@ -1,0 +1,4 @@
+# Ignore everything in this directory
+# They will all be private and local log files
+*
+!.gitignore
