@@ -21,13 +21,16 @@ import logging
 import mongoConnect
 
 class paleobio:
-    def __init__(self):
+    def __init__(self, test):
         self.config = json.load(open('./config.json'))
         self.source = "paleobio"
         self.logger = logging.getLogger("ingest.paleobio")
-        self.occurrenceURL = 'https://paleobiodb.org/data1.2/occs/list.csv?all_records&show=full&occs_modified_after=' + self.config['pbdb_ingest_interval']
-        self.collectionURL = 'https://paleobiodb.org/data1.2/colls/list.csv?all_records&show=full&colls_modified_after=' + self.config['pbdb_ingest_interval']
-        self.referenceURL = 'https://paleobiodb.org/data1.2/refs/list.csv?all_records&show=full&refs_modified_after=' + self.config['pbdb_ingest_interval']
+        ingestInterval = self.config['pbdb_ingest_interval']
+        if test:
+            ingestInterval = '24h'
+        self.occurrenceURL = 'https://paleobiodb.org/data1.2/occs/list.csv?all_records&show=full&occs_modified_after=' + ingestInterval
+        self.collectionURL = 'https://paleobiodb.org/data1.2/colls/list.csv?all_records&show=full&colls_modified_after=' + ingestInterval
+        self.referenceURL = 'https://paleobiodb.org/data1.2/refs/list.csv?all_records&show=full&refs_modified_after=' + ingestInterval
 
     # This is the main component of the ingester, and relies on a few different
     # helpers. But most of this code is specific to PaleoBio
@@ -59,7 +62,7 @@ class paleobio:
             self.logger.debug("Deleted source file: " + csvFile)
         # Merge collections and references into occurrence collection
         self.logger.info("Merging temporary collections")
-        mergeResult = mongoConn.pbdbMergeTmpCollections('tmp_occurrence', 'tmp_collection', 'tmp_references')
+        mergeResult = mongoConn.pbdbMergeTmpCollections('tmp_occurrence', 'tmp_collection', 'tmp_reference')
         if mergeResult is False:
             self.logger.error("Could not merge PaleoBio collections. Halting")
             return False

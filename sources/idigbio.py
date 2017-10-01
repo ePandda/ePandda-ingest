@@ -23,7 +23,7 @@ import logging
 import mongoConnect
 
 class idigbio:
-    def __init__(self):
+    def __init__(self, test):
         self.source = "idigbio"
         self.ingestURL = "http://s.idigbio.org/idigbio-static-downloads?max-keys=10000000"
         self.collectionRoot = "http://s.idigbio.org/idigbio-static-downloads/"

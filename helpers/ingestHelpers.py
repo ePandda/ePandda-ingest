@@ -5,11 +5,15 @@ import os
 import shutil
 from importlib import import_module
 import argparse
+import logging
 import json
 import hashlib
 import pandas as pd
 from tempfile import NamedTemporaryFile
 import csv
+
+# Create the helper logger
+logger = logging.getLogger('ingest.helpers')
 
 def getSourceNames(sources):
     sourceNames = {}
@@ -35,17 +39,23 @@ def getMd5Hash(dict):
 def csvDuplicateHeaderCheck(csvFile):
     occurrenceHeader = pd.read_csv(csvFile, sep=",", nrows=1)
     occurrenceHeadList = list(occurrenceHeader.columns.values)
-    duplicateHeaders =
+    logger.debug(occurrenceHeadList)
+    duplicateHeaders = []
     for header in occurrenceHeadList:
+        if '.' in header:
+            logger.debug("Found invalid header: " + header)
+            duplicateHeaders.append(header[:-2])
         if occurrenceHeadList.count(header) > 1:
+            logger.debug("Found duplicate header: " + header)
             if header in duplicateHeaders:
                 continue
             duplicateHeaders.append(header)
     return duplicateHeaders
 
-def csvRenameDuplicateHeaders(csvFile, duplicateHeaders):
+def csvRenameDuplicateHeaders(csvFileName, duplicateHeaders):
+    logger.info("Removing duplicate header values from " + csvFileName)
     tempfile = NamedTemporaryFile(delete=False)
-    with open(csvFile, 'rb') as csvFile, tempfile:
+    with open(csvFileName, 'rb') as csvFile, tempfile:
         reader = csv.reader(csvFile)
         writer = csv.writer(tempfile)
         rowCount = 0
@@ -54,9 +64,11 @@ def csvRenameDuplicateHeaders(csvFile, duplicateHeaders):
                 for duplicate in duplicateHeaders:
                     dupCount = 0
                     for i in range(len(row)):
-                        dupCount += 1
                         if row[i] == duplicate:
+                            logger.debug("Replacing bad header: " + duplicate)
+                            dupCount += 1
                             row[i] = duplicate + str(i)
             writer.writerow(row)
-    shutil.move(tempfile.name, csvFile)
+            rowCount += 1
+    shutil.move(tempfile.name, csvFileName)
     return True

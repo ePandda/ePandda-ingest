@@ -78,12 +78,16 @@ class mongoConnect:
     def pbdbIngestTmpCollections(self, csvFiles):
         for csvFile in csvFiles:
             # Checking for duplicate headers
-            duplicateHeaders = csvDuplicateHeaderCheck(csvFile)
+            duplicateHeaders = ingestHelpers.csvDuplicateHeaderCheck(csvFile)
             if duplicateHeaders:
-                self.logger.info("Removing duplicate header values from " + csvFile)
-                csvRenameDuplicateHeaders(csvFile, duplicateHeaders)
+                self.logger.debug(duplicateHeaders)
+                renameStatus = ingestHelpers.csvRenameDuplicateHeaders(csvFile, duplicateHeaders)
             collectionName = 'tmp_' + csvFile[:-4]
-            importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', collectionName, '--type', 'csv', '--file', csvFile, '--headerline', '--drop'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+            dropStatus = ''
+            if collectionName == 'tmp_occurrence':
+                dropStatus = '--drop'
+            self.logger.debug("Drop flag is: " + dropStatus)
+            importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', collectionName, '--type', 'csv', '--file', csvFile, '--headerline', dropStatus], stdin=PIPE, stdout=PIPE, stderr=PIPE)
             out, err = importCall.communicate()
             if importCall.returncode != 0:
                 self.logger.error("mongoimport failed with error: " + err)
@@ -111,7 +115,7 @@ class mongoConnect:
             if not collectionData:
                 self.logger.error("Could not find collection_no: " + str(collectionNo))
             self.logger.debug("Adding collection data for collection_no: " + str(collectionNo))
-            occurrenceCollection.update_many({'collection_no': collection_no}, {'$addToSet': {'coll_refs': collectionData}})
+            occurrenceCollection.update_many({'collection_no': collectionNo}, {'$addToSet': {'coll_refs': collectionData}})
 
         self.logger.info("Merging occurrences and references")
         referenceNos = occurrenceCollection.distinct('reference_no')
@@ -120,7 +124,7 @@ class mongoConnect:
             if not referenceData:
                 self.logger.error("Could not find reference_no: " + str(referenceNo))
             self.logger.debug("Adding collection data for collection_no: " + str(referenceNo))
-            occurrenceCollection.update_many({'reference_no': reference_no}, {'$addToSet': {'occ_refs': referenceData}})
+            occurrenceCollection.update_many({'reference_no': referenceNo}, {'$addToSet': {'occ_refs': referenceData}})
 
         return True
 
@@ -128,7 +132,7 @@ class mongoConnect:
         self.logger.info("Merging new PaleoBio data")
 
         self.logger.debug("Exporting contents of temporary collection")
-        exportCall = Popen(['mongoexport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', tmp_occurrence, '--type', 'json', '-o', 'tmp_occurrence.json'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        exportCall = Popen(['mongoexport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', 'tmp_occurrence', '--type', 'json', '-o', 'tmp_occurrence.json'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
         out, err = exportCall.communicate()
         if exportCall.returncode != 0:
             self.logger.error("mongoexport failed with error: " + err)
@@ -145,6 +149,7 @@ class mongoConnect:
         else:
             self.logger.info("mongoimport success! " + out)
             return True
+        os.remove('tmp_occurrence.json')
         return mergeResult
 
 

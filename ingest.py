@@ -42,8 +42,8 @@ def main():
     logger = logHelpers.createLog('ingest', logLevel)
     logger.info("Starting ePandda ingest")
     # Source classes
-    idb = idigbio.idigbio()
-    pbdb = paleobio.paleobio()
+    idb = idigbio.idigbio(testRun)
+    pbdb = paleobio.paleobio(testRun)
     sourceNames = ingestHelpers.getSourceNames([idb, pbdb])
 
     try:
