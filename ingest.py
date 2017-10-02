@@ -37,13 +37,14 @@ def main():
     dryRun = args.dryRun
     testRun = args.test
     logLevel = args.logLevel
+    fullRefresh = args.fullRefresh
 
     # Create the log
     logger = logHelpers.createLog('ingest', logLevel)
     logger.info("Starting ePandda ingest")
     # Source classes
-    idb = idigbio.idigbio(testRun)
-    pbdb = paleobio.paleobio(testRun)
+    idb = idigbio.idigbio(testRun, fullRefresh)
+    pbdb = paleobio.paleobio(testRun, fullRefresh)
     sourceNames = ingestHelpers.getSourceNames([idb, pbdb])
 
     try:
@@ -64,7 +65,8 @@ def main():
         outcome = ingester.runIngest(dry=dryRun, test=testRun)
         if outcome is False:
             logger.error("Import of " + ingestSource + " failed! Review full log")
-        logger.info("Import of " + ingestSource + " successful!")
+        else:
+            logger.info("Import of " + ingestSource + " successful!")
 
     logger.info("Ingest Complete")
 

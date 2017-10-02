@@ -21,13 +21,15 @@ import logging
 import mongoConnect
 
 class paleobio:
-    def __init__(self, test):
+    def __init__(self, test, fullRefresh):
         self.config = json.load(open('./config.json'))
         self.source = "paleobio"
         self.logger = logging.getLogger("ingest.paleobio")
-        ingestInterval = self.config['pbdb_ingest_interval']
+        ingestInterval = self.config['pbdb_ingest_interval'] + 'd'
         if test:
             ingestInterval = '24h'
+        elif fullRefresh:
+            ingestIntegral = '1900'
         self.occurrenceURL = 'https://paleobiodb.org/data1.2/occs/list.csv?all_records&show=full&occs_modified_after=' + ingestInterval
         self.collectionURL = 'https://paleobiodb.org/data1.2/colls/list.csv?all_records&show=full&colls_modified_after=' + ingestInterval
         self.referenceURL = 'https://paleobiodb.org/data1.2/refs/list.csv?all_records&show=both&refs_modified_after=' + ingestInterval

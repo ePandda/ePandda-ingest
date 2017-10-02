@@ -28,7 +28,7 @@ class mongoConnect:
         self.endpoints = self.client[self.config['endpoints_db']]
         self.logger = logging.getLogger("ingest.mongoConnection")
 
-    def checkIDBCollectionStatus(self, collectionKey, modifiedDate, collectionSize):
+    def checkIDBCollectionStatus(self, collectionKey, modifiedDate):
         # Status flags
         # new = This is a new collection
         # modified = This collection has been modified since the last ingest
@@ -59,8 +59,8 @@ class mongoConnect:
             self.logger.warning("Failed to update this record in collectionStatus: " + collectionKey)
         return True
 
-    def iDBPartialImport(self, occurrenceFile, collectionKey, collectionModified):
-        importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['idigbio_db'], '-c', self.config['idigbio_coll'], '--type', 'csv', '--file', occurrenceFile, '--headerline', '--mode', 'upsert', '--upsertFields', 'idigbio:uuid'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+    def iDBPartialImport(self, occurrenceFile, collectionKey, collectionModified, fileType):
+        importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['idigbio_db'], '-c', self.config['idigbio_coll'], '--type', fileType, '--file', occurrenceFile, '--headerline', '--mode', 'upsert', '--upsertFields', 'idigbio:uuid'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
             self.logger.error("mongoimport failed with error: " + err)
