@@ -67,7 +67,7 @@ def csvRenameDuplicateHeaders(csvFileName, duplicateHeaders):
                         if row[i] == duplicate:
                             logger.debug("Replacing bad header: " + duplicate)
                             dupCount += 1
-                            row[i] = duplicate + str(i)
+                            row[i] = duplicate + str(dupCount)
             writer.writerow(row)
             rowCount += 1
     shutil.move(tempfile.name, csvFileName)

@@ -94,7 +94,7 @@ class mongoConnect:
                 return False
             else:
                 self.logger.info("mongoimport success! " + out)
-                return True
+        return True
 
     def pbdbMergeTmpCollections(self, occurrence, collection, reference):
         self.logger.debug("Getting unique collection_no values from occurrences")
@@ -114,6 +114,7 @@ class mongoConnect:
             collectionData = collectionCollection.find_one({'collection_no': collectionNo})
             if not collectionData:
                 self.logger.error("Could not find collection_no: " + str(collectionNo))
+                continue
             self.logger.debug("Adding collection data for collection_no: " + str(collectionNo))
             occurrenceCollection.update_many({'collection_no': collectionNo}, {'$addToSet': {'coll_refs': collectionData}})
 
@@ -123,6 +124,7 @@ class mongoConnect:
             referenceData = referenceCollection.find_one({'reference_no': referenceNo})
             if not referenceData:
                 self.logger.error("Could not find reference_no: " + str(referenceNo))
+                continue
             self.logger.debug("Adding collection data for collection_no: " + str(referenceNo))
             occurrenceCollection.update_many({'reference_no': referenceNo}, {'$addToSet': {'occ_refs': referenceData}})
 
