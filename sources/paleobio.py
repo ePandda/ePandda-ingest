@@ -30,7 +30,7 @@ class paleobio:
             ingestInterval = '24h'
         self.occurrenceURL = 'https://paleobiodb.org/data1.2/occs/list.csv?all_records&show=full&occs_modified_after=' + ingestInterval
         self.collectionURL = 'https://paleobiodb.org/data1.2/colls/list.csv?all_records&show=full&colls_modified_after=' + ingestInterval
-        self.referenceURL = 'https://paleobiodb.org/data1.2/refs/list.csv?all_records&show=full&refs_modified_after=' + ingestInterval
+        self.referenceURL = 'https://paleobiodb.org/data1.2/refs/list.csv?all_records&show=both&refs_modified_after=' + ingestInterval
 
     # This is the main component of the ingester, and relies on a few different
     # helpers. But most of this code is specific to PaleoBio

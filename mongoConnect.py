@@ -86,7 +86,11 @@ class mongoConnect:
             importArgs = ['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', collectionName, '--type', 'csv', '--file', csvFile, '--headerline']
             if collectionName == 'tmp_occurrence':
                 importArgs.append('--drop')
-            self.logger.debug("Drop flag is: " + dropStatus)
+            	self.logger.debug("Dropping existing records in " + collectionName)
+	    elif collectionName == 'tmp_reference':
+                importArgs.extend(['--mode', 'upsert', '--upsertFields', 'reference_no'])
+            elif collectionName == 'tmp_collection':
+                importArgs.extend(['--mode', 'upsert', '--upsertFields', 'collection_no'])
             importCall = Popen(importArgs, stdin=PIPE, stdout=PIPE, stderr=PIPE)
             out, err = importCall.communicate()
             if importCall.returncode != 0:
