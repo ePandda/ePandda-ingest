@@ -83,11 +83,11 @@ class mongoConnect:
                 self.logger.debug(duplicateHeaders)
                 renameStatus = ingestHelpers.csvRenameDuplicateHeaders(csvFile, duplicateHeaders)
             collectionName = 'tmp_' + csvFile[:-4]
-            dropStatus = ''
+            importArgs = ['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', collectionName, '--type', 'csv', '--file', csvFile, '--headerline']
             if collectionName == 'tmp_occurrence':
-                dropStatus = '--drop'
+                importArgs.append('--drop')
             self.logger.debug("Drop flag is: " + dropStatus)
-            importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', collectionName, '--type', 'csv', '--file', csvFile, '--headerline', dropStatus], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+            importCall = Popen(importArgs, stdin=PIPE, stdout=PIPE, stderr=PIPE)
             out, err = importCall.communicate()
             if importCall.returncode != 0:
                 self.logger.error("mongoimport failed with error: " + err)
