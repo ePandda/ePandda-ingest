@@ -28,6 +28,14 @@ class mongoConnect:
         self.endpoints = self.client[self.config['endpoints_db']]
         self.logger = logging.getLogger("ingest.mongoConnection")
 
+    def closeConnection(self):
+        try:
+            self.client.close()
+            return True
+        except:
+            self.logger.error("Couldn't close mongo connection")
+            return False
+
     def checkIDBCollectionStatus(self, collectionKey, modifiedDate):
         # Status flags
         # new = This is a new collection

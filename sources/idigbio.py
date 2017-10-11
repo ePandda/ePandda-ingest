@@ -20,6 +20,7 @@ import shutil
 import logging
 from datetime import datetime, timedelta
 import time
+import re
 
 # local stuff
 import mongoConnect
@@ -31,12 +32,13 @@ class idigbio:
         self.fullRefresh = fullRefresh
         self.ingestURL = "http://s.idigbio.org/idigbio-static-downloads?max-keys=10000000"
         self.collectionRoot = "http://s.idigbio.org/idigbio-static-downloads/"
-        refreshInterval = self.config['idigbio_ingest_interval']
+        self.refreshInterval = self.config['idigbio_ingest_interval']
         if test:
-            refreshInterval = '1'
-        self.refreshDate = datetime.today() - timedelta(days=int(refreshInterval))
+            self.refreshInterval = 1
+        self.refreshDate = datetime.today() - timedelta(days=int(self.refreshInterval))
         self.refreshFrom = self.refreshDate.strftime('%Y-%m-%d')
         self.refreshURL = 'https://api.idigbio.org/v2/download/?rq={"datemodified":{"type":"range","gte":"' + self.refreshFrom + '"}}'
+        self.refreshDownloadURL = "http://s.idigbio.org/idigbio-downloads/"
         self.logger = logging.getLogger("ingest.idigbio")
 
     # This is the main component of the ingester, and relies on a few different
@@ -52,13 +54,13 @@ class idigbio:
             ingestResult = self.runPartialIngest()
 
     def runPartialIngest(self):
-        self.logger.info("Starting ingest of iDigbio records modified in past " + self.config['idigbio_ingest_interval'] + " days")
+        self.logger.info("Starting ingest of iDigbio records modified in past " + str(self.refreshInterval) + " days")
 
         # open a mongo connection
         mongoConn = mongoConnect.mongoConnect()
-        collectionKey = 'iDigBio_ingest_' + self.refreshFrom
+        collectionName = 'iDigBio_ingest_' + self.refreshFrom
         # Check if the collection has already been updated for this date
-        refreshStatus = mongoConn.checkIDBCollectionStatus(collectionKey, self.refreshFrom)
+        refreshStatus = mongoConn.checkIDBCollectionStatus(collectionName, self.refreshFrom)
         if refreshStatus == 'static':
             self.logger.info("An ingest has already been run from this date")
             return False
@@ -70,13 +72,30 @@ class idigbio:
             return False
 
         # Wait for the download file to be generated and get the download link
-        idbDownloadFile = self.getIDBDownloadFile(modifiedStatusURL)
+        idbDownloadURL = self.getIDBDownloadURL(modifiedStatusURL)
         if idbDownloadFile is False:
             self.logger.error("Could not get iDigBio downloadURL")
             return False
 
+        # Get the collectionKey for the downloaded collection
+        collectionMatch = re.search('\/([a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}.zip)$', idbDownloadURL)
+        if collectionMatch:
+            collectionKey = collectionMatch.group(1)
+
+        # Download & unzip the zip file!
+        collectionDir = self.downloadCollection(self.refreshDownloadURL, collectionKey)
+        if not collectionDir:
+            return False
+
+        # Check that we got a decent CSV/TXT file in that unzipped directory
+        # This spot checks 'core' fields from each of the main indexes we create
+        # If there they're it means that its a well formed record
+        occurrenceFile = self.checkCollection(collectionDir)
+        if not occurrenceFile:
+            return False
+
         # Download and ingest the created iDigBio file
-        ingestResult = mongoConn.iDBPartialImport(idbDownloadFile, collectionKey, self.refreshFrom, 'json')
+        ingestResult = mongoConn.iDBPartialImport(occurrenceFile, collectionName, self.refreshFrom, 'csv')
         if ingestResult is False:
             self.logger.error("There were at least some errors during import of " + collectionKey)
             print "Imported with at least some errors"
@@ -174,7 +193,7 @@ class idigbio:
                 return recordStatus["status_url"]
         return False
 
-    def getIDBDownloadFile(self, statusURL):
+    def getIDBDownloadYRK(self, statusURL):
         self.logger.info("Getting iDigBio download from: " + statusURL)
         while True:
             self.logger.debug("Checking status of iDigBio partial download")
@@ -188,24 +207,13 @@ class idigbio:
                 downloadStatus = requestStatus.json()
                 if "task_status" in downloadStatus:
                     if downloadStatus['task_status'] == "SUCCESS":
-                        downloadURL = downloadStatus['download_url']
-                        break
+                        return downloadStatus['download_url']
             else:
                 self.logger.error("iDigBio download link failed")
                 return False
             time.sleep(30)
 
-        self.logger.info("Downloading iDigBio records from " + downloadURL)
-        idbDownloadFile = 'iDigBioModified.json'
-        try:
-            iDBJSON = urllib2.urlopen(downloadURL).read()
-            with open(idbDownloadFile, 'wb') as jsonFile:
-                jsonFile.write(iDBJSON)
-        except:
-            self.logger.error("Could not download JSON file from iDigBio")
-            return False
-
-        return idbDownloadFile
+        return False
 
 
 

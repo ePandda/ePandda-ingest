@@ -61,6 +61,8 @@ def main():
 
     for ingestSource in ingestSources:
         ingester = sourceNames[ingestSource]
+        # TODO Check for existence of necessary collections & Indexes
+        # Create them if necessary
         logger.info("Starting import for: " + ingestSource)
         outcome = ingester.runIngest(dry=dryRun, test=testRun)
         if outcome is False:
