@@ -35,12 +35,26 @@ def createLog(module, level, fileSuffix):
     logger.addHandler(conLog)
     return logger
 
-def createMongoLog(startDateTime, sources):
+def createMongoLog(sources):
     # open a mongo connection
     mongoConn = mongoConnect.mongoConnect()
-    ingestLogID = mongoConn.createIngestLog(startDateTime, sources)
+    ingestLogID = mongoConn.createIngestLog(sources)
     mongoConn.closeConnection()
     return ingestLogID
+
+def addFullCounts(ingestID, sources):
+    # open a mongo connection
+    mongoConn = mongoConnect.mongoConnect()
+    countsResult = {}
+    for source in sources:
+        countStatus = mongoConn.addLogCount(ingestID, source)
+        if countStatus is False:
+            countsResult[source] = None
+            continue
+        countsResult[source] = countStatus
+    return countsResult
+
+
 
 def logRunTime(ingestID, startTime, endTime):
     logger = logging.getLogger('ingest.log')
@@ -53,4 +67,5 @@ def logRunTime(ingestID, startTime, endTime):
     # open a mongo connection
     mongoConn = mongoConnect.mongoConnect()
     ingestLogComplete = mongoConn.addRunTime(ingestID, timeString)
+    mongoConn.closeConnection()
     return ingestLogComplete

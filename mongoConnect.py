@@ -15,6 +15,7 @@ import csv
 # sys tools
 from subprocess import Popen, PIPE, call
 import logging
+import datetime
 
 # helper module
 from helpers import ingestHelpers
@@ -164,12 +165,11 @@ class mongoConnect:
         else:
             self.logger.info("mongoimport success! " + out)
             return True
-        os.remove('tmp_occurrence.json')
-        return mergeResult
+        return True
 
-    def createIngestLog(self, startDateTime, sources):
+    def createIngestLog(self, sources):
         ingests = self.ingestLog[self.config['ingest_collection']]
-        ingestRecord = ingests.insert_one({'ingestDate': startDateTime, 'ingestSources': sources, 'status': 'STARTED'})
+        ingestRecord = ingests.insert_one({'ingestDate': datetime.datetime.utcnow(), 'ingestSources': sources, 'status': 'STARTED'})
         ingestId = ingestRecord.inserted_id
         return ingestId
 
@@ -181,6 +181,30 @@ class mongoConnect:
             return True
         else:
             self.logger.warning("Could not add time to mongo ingest log!")
+            return False
+
+    def addToIngestCount(self, ingestID, source, recordCount):
+        ingests = self.ingestLog[self.config['ingest_collection']]
+        ingestResult = ingests.update_one({'_id': ingestID}, {'$inc': {source+'_updated_records': recordCount}})
+        if ingestResult.modified_count == 1:
+            self.logger.debug("Added import count to ingest log")
+            return True
+        else:
+            self.logger.warning("Could not add import count to ingest log!")
+            return False
+
+    def addLogCount(self, ingestID, source):
+        ingests = self.ingestLog[self.config['ingest_collection']]
+        sourceDB = self.client[self.config[source+'_db']]
+        sourceCollection = sourceDB[self.config[source+'_coll']]
+        totalCount = sourceCollection.find({}).count()
+        self.logger.info(str(totalCount) + " Records in " + source)
+        ingestResult = ingests.update_one({'_id': ingestID}, {'$set': {source+"_total_records": totalCount}})
+        if ingestResult.modified_count == 1:
+            self.logger.debug("Added total count to ingest log")
+            return totalCount
+        else:
+            self.logger.warning("Could not add total count to ingest log!")
             return False
 
     def indexTest(self, db, collection, indexes):

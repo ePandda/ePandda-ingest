@@ -33,8 +33,6 @@ from helpers import testHelpers
 def main():
     # Start the process timer and create ingest_run mongo entry
     startTime = time.time()
-    startDateTime = time.strftime("%Y/%m/%d@%H:%M:%s")
-
 
     # Get the parameters provided in the args
     parser = ingestHelpers.createParser()
@@ -45,13 +43,16 @@ def main():
     logLevel = args.logLevel
     fullRefresh = args.fullRefresh
 
+    # Create log entry in ingest collection
+    ingestID = logHelpers.createMongoLog(ingestSources)
+
     # Create the logs
     logger = logHelpers.createLog('ingest', logLevel, '_ingest')
     testLogger = logHelpers.createLog('test', logLevel, '_tests')
     logger.info("Starting ePandda ingest")
     # Source classes
-    idb = idigbio.idigbio(testRun, fullRefresh)
-    pbdb = paleobio.paleobio(testRun, fullRefresh)
+    idb = idigbio.idigbio(testRun, fullRefresh, ingestID)
+    pbdb = paleobio.paleobio(testRun, fullRefresh, ingestID)
     sourceNames = ingestHelpers.getSourceNames([idb, pbdb])
 
     try:
@@ -65,9 +66,6 @@ def main():
         for source in sourceNames:
             print source
         sys.exit(0)
-
-    # Create log entry in ingest collection
-    ingestID = logHelpers.createMongoLog(startDateTime, ingestSources)
 
     # Create test instance
     tests = testHelpers.epanddaTests()
@@ -86,6 +84,12 @@ def main():
             logger.error("Import of " + ingestSource + " failed! Review full log")
         else:
             logger.info("Import of " + ingestSource + " successful!")
+
+    # Log the current number of records in ePandda
+    addFullCounts = logHelpers.addFullCounts(ingestID, ingestSources)
+    # Check full counts against APIs of source providers
+    tests.checkCounts([idb, pbdb], addFullCounts)
+
 
     endTime = time.time()
     ingestLogStatus = logHelpers.logRunTime(ingestID, startTime, endTime)

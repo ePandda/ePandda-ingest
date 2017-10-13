@@ -9,6 +9,7 @@ import pandas as pd
 # Data harvesting/gathering
 from unidecode import unidecode
 import urllib2
+import requests
 
 # System tools
 import traceback
@@ -19,11 +20,12 @@ import logging
 
 # local stuff
 import mongoConnect
+from helpers import ingestHelpers
 
 class paleobio:
-    def __init__(self, test, fullRefresh):
+    def __init__(self, test, fullRefresh, ingestLog):
         self.config = json.load(open('./config.json'))
-        self.source = "paleobio"
+        self.source = "pbdb"
         self.logger = logging.getLogger("ingest.paleobio")
         ingestInterval = self.config['pbdb_ingest_interval'] + 'd'
         if test:
@@ -33,6 +35,8 @@ class paleobio:
         self.occurrenceURL = 'https://paleobiodb.org/data1.2/occs/list.csv?all_records&show=full&occs_modified_after=' + ingestInterval
         self.collectionURL = 'https://paleobiodb.org/data1.2/colls/list.csv?all_records&show=full&colls_modified_after=' + ingestInterval
         self.referenceURL = 'https://paleobiodb.org/data1.2/refs/list.csv?all_records&show=both&refs_modified_after=' + ingestInterval
+        self.recordCountURL = 'https://paleobiodb.org/data1.2/occs/list.json?all_records&rowcount&limit=1'
+        self.ingestLog = ingestLog
 
     # This is the main component of the ingester, and relies on a few different
     # helpers. But most of this code is specific to PaleoBio
@@ -59,6 +63,12 @@ class paleobio:
             return False
         self.logger.info("Created PaleoBio temporary collections")
 
+        # Get the count of records being imported and store it in the ingest log
+        recordCount = ingestHelpers.csvCountRows('occurrence.csv')
+        recordCountResult = mongoConn.addToIngestCount(self.ingestLog, self.source, recordCount)
+        if recordCountResult is False:
+            self.logger.error("Could not log record count. Check validity carefully!")
+
         for csvFile in downloadedFiles:
             os.remove(csvFile)
             self.logger.debug("Deleted source file: " + csvFile)
@@ -71,11 +81,11 @@ class paleobio:
         self.logger.info("Created merged dataset")
 
         # Merge new data into main pbdb collection
-        ingestResult = mongoConn.pbdbMergeNewData('tmp_occurrece')
+        ingestResult = mongoConn.pbdbMergeNewData('tmp_occurrence')
         if ingestResult is False:
             self.logger.error("There was an error ingesting new records. Halting and please review the log")
             return False
-
+        os.remove('tmp_occurence.json')
         return True
 
     def downloadFromPBDB(self):
@@ -91,3 +101,13 @@ class paleobio:
                 self.logger.error("Failed to download " + downloadURL[0])
                 return False
         return True
+
+    def getRecordCount(self):
+        self.logger.debug("Checking full PBDB record Count")
+        resp = requests.get(self.recordCountURL)
+        if resp.status_code == 200:
+            recordCountBody = resp.json()
+            if 'records_found' in recordCountBody:
+                recordCount = recordCountBody['records_found']
+                return recordCount
+        return None

@@ -22,11 +22,12 @@ from datetime import datetime, timedelta
 import time
 import re
 
-# local stuff
+# local modules
 import mongoConnect
+from helpers import ingestHelpers
 
 class idigbio:
-    def __init__(self, test, fullRefresh):
+    def __init__(self, test, fullRefresh, ingestLog):
         self.config = json.load(open('./config.json'))
         self.source = "idigbio"
         self.fullRefresh = fullRefresh
@@ -39,7 +40,9 @@ class idigbio:
         self.refreshFrom = self.refreshDate.strftime('%Y-%m-%d')
         self.refreshURL = 'https://api.idigbio.org/v2/download/?rq={"datemodified":{"type":"range","gte":"' + self.refreshFrom + '"}}'
         self.refreshDownloadURL = "http://s.idigbio.org/idigbio-downloads/"
+        self.recordCountURL = "https://search.idigbio.org/v2/summary/count/records/"
         self.logger = logging.getLogger("ingest.idigbio")
+        self.ingestLog = ingestLog
 
     # This is the main component of the ingester, and relies on a few different
     # helpers. But most of this code is specific to iDigBio
@@ -73,7 +76,7 @@ class idigbio:
 
         # Wait for the download file to be generated and get the download link
         idbDownloadURL = self.getIDBDownloadURL(modifiedStatusURL)
-        if idbDownloadFile is False:
+        if idbDownloadURL is False:
             self.logger.error("Could not get iDigBio downloadURL")
             return False
 
@@ -93,6 +96,12 @@ class idigbio:
         occurrenceFile = self.checkCollection(collectionDir)
         if not occurrenceFile:
             return False
+
+        # Get the count of records being imported and store it in the ingest log
+        recordCount = ingestHelpers.csvCountRows(occurrenceFile)
+        recordCountResult = mongoConn.addToIngestCount(self.ingestLog, self.source, recordCount)
+        if recordCountResult is False:
+            self.logger.error("Could not log record count. Check validity carefully!")
 
         # Download and ingest the created iDigBio file
         ingestResult = mongoConn.iDBPartialImport(occurrenceFile, collectionName, self.refreshFrom, 'csv')
@@ -154,6 +163,12 @@ class idigbio:
             if not occurrenceFile:
                 continue
 
+            # Get the count of records being imported and store it in the ingest log
+            recordCount = ingestHelpers.csvCountRows(occurrenceFile)
+            recordCountResult = mongoConn.addToIngestCount(self.ingestLog, self.source, recordCount)
+            if recordCountResult is False:
+                self.logger.error("Could not log record count. Check validity carefully!")
+
             # TODO Image check and merge
 
             # If the collection has validated, then either import the full collection or
@@ -193,7 +208,7 @@ class idigbio:
                 return recordStatus["status_url"]
         return False
 
-    def getIDBDownloadYRK(self, statusURL):
+    def getIDBDownloadURL(self, statusURL):
         self.logger.info("Getting iDigBio download from: " + statusURL)
         while True:
             self.logger.debug("Checking status of iDigBio partial download")
@@ -253,7 +268,17 @@ class idigbio:
                 self.logger.error(occurrenceFile + "is not a valid CSV or TXT. Check source collection for validity")
                 self.logger.debug("Header list for invalid file: " + str(occurrenceHeadList))
                 return None
-        duplicateHeaders = csvDuplicateHeaderCheck(occurrenceFile)
+        duplicateHeaders = ingestHelpers.csvDuplicateHeaderCheck(occurrenceFile)
         if duplicateHeaders:
             csvRenameDuplicateHeaders(occurrenceFile, duplicateHeaders)
         return occurrenceFile
+
+    def getRecordCount(self):
+        self.logger.debug("Checking full PBDB record Count")
+        resp = requests.get(self.recordCountURL)
+        if resp.status_code == 200:
+            recordCountBody = resp.json()
+            if 'itemCount' in recordCountBody:
+                recordCount = recordCountBody['itemCount']
+                return recordCount
+        return None

@@ -73,3 +73,9 @@ def csvRenameDuplicateHeaders(csvFileName, duplicateHeaders):
             rowCount += 1
     shutil.move(tempfile.name, csvFileName)
     return True
+
+def csvCountRows(csvFileName):
+    with open(csvFileName, 'rb') as csvFile:
+        rowCount = sum(1 for row in csvFile)
+    rowCount -= 1 # Accounts for header row
+    return rowCount
