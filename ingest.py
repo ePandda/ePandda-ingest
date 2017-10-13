@@ -14,6 +14,7 @@ import json
 import datetime
 import argparse
 import logging
+import time
 
 # import/ingest dependencies
 import urllib2
@@ -27,8 +28,13 @@ from sources import paleobio
 # Helper functions for managing ingest
 from helpers import ingestHelpers
 from helpers import logHelpers
+from helpers import testHelpers
 
 def main():
+    # Start the process timer and create ingest_run mongo entry
+    startTime = time.time()
+    startDateTime = time.strftime("%Y/%m/%d@%H:%M:%s")
+
 
     # Get the parameters provided in the args
     parser = ingestHelpers.createParser()
@@ -39,8 +45,9 @@ def main():
     logLevel = args.logLevel
     fullRefresh = args.fullRefresh
 
-    # Create the log
-    logger = logHelpers.createLog('ingest', logLevel)
+    # Create the logs
+    logger = logHelpers.createLog('ingest', logLevel, '_ingest')
+    testLogger = logHelpers.createLog('test', logLevel, '_tests')
     logger.info("Starting ePandda ingest")
     # Source classes
     idb = idigbio.idigbio(testRun, fullRefresh)
@@ -59,10 +66,20 @@ def main():
             print source
         sys.exit(0)
 
+    # Create log entry in ingest collection
+    ingestID = logHelpers.createMongoLog(startDateTime, ingestSources)
+
+    # Create test instance
+    tests = testHelpers.epanddaTests()
+
     for ingestSource in ingestSources:
         ingester = sourceNames[ingestSource]
-        # TODO Check for existence of necessary collections & Indexes
-        # Create them if necessary
+
+        # Check indexes and create if necessary
+        indexStatus = tests.checkIndexes()
+        if indexStatus is False:
+            logger.error("Index Creation Failure")
+            sys.exit(3)
         logger.info("Starting import for: " + ingestSource)
         outcome = ingester.runIngest(dry=dryRun, test=testRun)
         if outcome is False:
@@ -70,6 +87,10 @@ def main():
         else:
             logger.info("Import of " + ingestSource + " successful!")
 
+    endTime = time.time()
+    ingestLogStatus = logHelpers.logRunTime(ingestID, startTime, endTime)
+    if ingestLogStatus == False:
+        logger.error("Failed to update mongo ingest log. CHECK FOR ERRORS!")
     logger.info("Ingest Complete")
 
 if __name__ == '__main__':

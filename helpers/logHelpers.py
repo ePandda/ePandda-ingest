@@ -2,12 +2,14 @@
 # Class for logining status/errors from the ingest
 #
 
-# Uses the main pythn logging module
-
+# Core python modules
 import logging
 import time
 
-def createLog(module, level):
+# local modules
+import mongoConnect
+
+def createLog(module, level, fileSuffix):
     logger = logging.getLogger(module)
     if level:
         checkLevel = level.lower()
@@ -15,7 +17,7 @@ def createLog(module, level):
         checkLevel = 'warning'
     levels = {'debug': logging.DEBUG, 'info': logging.INFO, 'warning': logging.WARNING, 'error': logging.ERROR, 'critical': logging.CRITICAL}
     today = time.strftime("%Y_%m_%d")
-    loggerFile = './logs/'+today+"_ingest.log"
+    loggerFile = './logs/' + today + fileSuffix + ".log"
     fileLog = logging.FileHandler(loggerFile)
     conLog = logging.StreamHandler()
     if checkLevel in levels:
@@ -32,3 +34,23 @@ def createLog(module, level):
     logger.addHandler(fileLog)
     logger.addHandler(conLog)
     return logger
+
+def createMongoLog(startDateTime, sources):
+    # open a mongo connection
+    mongoConn = mongoConnect.mongoConnect()
+    ingestLogID = mongoConn.createIngestLog(startDateTime, sources)
+    mongoConn.closeConnection()
+    return ingestLogID
+
+def logRunTime(ingestID, startTime, endTime):
+    logger = logging.getLogger('ingest.log')
+    logger.debug("Start time " + str(startTime))
+    logger.debug("Start time " + str(endTime))
+    totalTime = endTime - startTime
+    minutes, seconds = divmod(totalTime, 60)
+    hours, minutes = divmod(minutes, 60)
+    timeString = "%d:%02d:%02d" % (hours, minutes, seconds)
+    # open a mongo connection
+    mongoConn = mongoConnect.mongoConnect()
+    ingestLogComplete = mongoConn.addRunTime(ingestID, timeString)
+    return ingestLogComplete

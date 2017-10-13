@@ -25,6 +25,7 @@ class mongoConnect:
         self.client = MongoClient("mongodb://" + self.config['mongodb_user'] + ":" + self.config['mongodb_password'] + "@" + self.config['mongodb_host'])
         self.idigbio = self.client[self.config['idigbio_db']]
         self.pbdb = self.client[self.config['pbdb_db']]
+        self.ingestLog = self.client[self.config['log_db']]
         self.endpoints = self.client[self.config['endpoints_db']]
         self.logger = logging.getLogger("ingest.mongoConnection")
 
@@ -166,6 +167,53 @@ class mongoConnect:
         os.remove('tmp_occurrence.json')
         return mergeResult
 
+    def createIngestLog(self, startDateTime, sources):
+        ingests = self.ingestLog[self.config['ingest_collection']]
+        ingestRecord = ingests.insert_one({'ingestDate': startDateTime, 'ingestSources': sources, 'status': 'STARTED'})
+        ingestId = ingestRecord.inserted_id
+        return ingestId
+
+    def addRunTime(self, ingestID, timeString):
+        ingests = self.ingestLog[self.config['ingest_collection']]
+        ingestResult = ingests.update_one({'_id': ingestID}, {'$set': {'runTime': timeString, 'status': 'COMPLETE'}})
+        if ingestResult.modified_count == 1:
+            self.logger.debug("Added run time to mongo ingest log")
+            return True
+        else:
+            self.logger.warning("Could not add time to mongo ingest log!")
+            return False
+
+    def indexTest(self, db, collection, indexes):
+        self.logger.debug("Checking indexes for " + collection)
+        collectionName = self.config[collection]
+        testCollection = self.client[db][collectionName]
+        print testCollection
+        existingIndexes = testCollection.index_information()
+        indexChecklist = []
+        missingIndexes = []
+        for indexID in existingIndexes:
+            indexName = existingIndexes[indexID]['key'][0][0]
+            self.logger.debug("Adding record for index " + indexName)
+            indexChecklist.append(indexName)
+        for index in indexes:
+            if index not in indexChecklist:
+                missingIndexes.append(index)
+        if missingIndexes:
+            return missingIndexes
+        return True
+
+    def createIndex(self, db, collection, indexes):
+        self.logger.info("Creating missing indexes for " + collection)
+        collectionName = self.config[collection]
+        targetCollection = self.client[db][collectionName]
+        for index in indexes:
+            try:
+                targetCollection.create_index(index)
+                self.logger.info("Created index " + index + " on " + collection)
+            except:
+                self.logger.error("Failed to create index " + index + " on " + collection)
+                return False
+        return True
 
     # This method is going to be deprecated as unecessary!
     # TODO DELETE once confirmed that we can just use upsert on records
