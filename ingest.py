@@ -47,8 +47,8 @@ def main():
     ingestID = logHelpers.createMongoLog(ingestSources)
 
     # Create the logs
-    logger = logHelpers.createLog('ingest', logLevel, '_ingest')
-    testLogger = logHelpers.createLog('test', logLevel, '_tests')
+    logger, coreLogFile = logHelpers.createLog('ingest', logLevel, '_ingest')
+    testLogger, testLogFile = logHelpers.createLog('test', logLevel, '_tests')
     logger.info("Starting ePandda ingest")
     # Source classes
     idb = idigbio.idigbio(testRun, fullRefresh, ingestID)
@@ -70,11 +70,12 @@ def main():
     # Create test instance
     tests = testHelpers.epanddaTests()
 
+    # Check indexes and create if necessary
+    indexStatus = tests.checkIndexes()
+
     for ingestSource in ingestSources:
         ingester = sourceNames[ingestSource]
 
-        # Check indexes and create if necessary
-        indexStatus = tests.checkIndexes()
         if indexStatus is False:
             logger.error("Index Creation Failure")
             sys.exit(3)
@@ -82,11 +83,16 @@ def main():
         outcome = ingester.runIngest(dry=dryRun, test=testRun)
         if outcome is False:
             logger.error("Import of " + ingestSource + " failed! Review full log")
+            logHelpers.emailLogAndStatus('ERROR', logger.baseFilename, testLogger.baseFilename, ['michael@whirl-i-gig.com, mwbenowitz@gmail.com'])
         else:
             logger.info("Import of " + ingestSource + " successful!")
 
     # Log the current number of records in ePandda
     addFullCounts = logHelpers.addFullCounts(ingestID, ingestSources)
+
+    # Test for existence/well form-edness of sentinel records
+    
+
     # Check full counts against APIs of source providers
     tests.checkCounts([idb, pbdb], addFullCounts)
 
@@ -95,6 +101,7 @@ def main():
     ingestLogStatus = logHelpers.logRunTime(ingestID, startTime, endTime)
     if ingestLogStatus == False:
         logger.error("Failed to update mongo ingest log. CHECK FOR ERRORS!")
+    logHelpers.emailLogAndStatus('FINAL STATUS', coreLogFile, testLogFile, ['michael@whirl-i-gig.com, mwbenowitz@gmail.com'])
     logger.info("Ingest Complete")
 
 if __name__ == '__main__':

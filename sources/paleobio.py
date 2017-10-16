@@ -85,7 +85,7 @@ class paleobio:
         if ingestResult is False:
             self.logger.error("There was an error ingesting new records. Halting and please review the log")
             return False
-        os.remove('tmp_occurence.json')
+        os.remove('tmp_occurrence.json')
         return True
 
     def downloadFromPBDB(self):
