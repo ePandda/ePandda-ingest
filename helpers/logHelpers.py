@@ -76,14 +76,19 @@ def logRunTime(ingestID, startTime, endTime):
     mongoConn.closeConnection()
     return ingestLogComplete
 
-def emailLogAndStatus(status, logFile, testLogFile, recipients):
+def emailLogAndStatus(status, logFile, testLogFile):
     config = json.load(open('./config.json'))
+    recipients = config['email_recipients']
+    if len(recipients) > 1:
+        recipientString = ', ',join(recipients)
+    else:
+        recipientString = recipients[0]
     logger = logging.getLogger('ingest.mail')
     smtpConfig = config['smtp']
     msg = MIMEMultipart()
     msg["Subject"] = "ePandda Ingest results from " + time.strftime("%Y/%m/%d")
     msg["From"] = "michael@whirl-i-gig.com"
-    msg["To"] = ', '.join(recipients)
+    msg["To"] = recipientString
 
     msg.attach(MIMEText(status + "\nCheck the attached log files for a summary of the most recent run of the ePandda ingest service"))
 

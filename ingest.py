@@ -50,7 +50,7 @@ def main():
     logger, coreLogFile = logHelpers.createLog('ingest', logLevel, '_ingest')
     testLogger, testLogFile = logHelpers.createLog('test', logLevel, '_tests')
     logger.info("Starting ePandda ingest")
-    # Source classes
+    # Source classes. Add new classes here
     idb = idigbio.idigbio(testRun, fullRefresh, ingestID)
     pbdb = paleobio.paleobio(testRun, fullRefresh, ingestID)
     sourceNames = ingestHelpers.getSourceNames([idb, pbdb])
@@ -68,22 +68,33 @@ def main():
         sys.exit(0)
 
     # Create test instance
-    tests = testHelpers.epanddaTests()
+    tests = testHelpers.epanddaTests(idb, pbdb)
 
     # Check indexes and create if necessary
     indexStatus = tests.checkIndexes()
+    if indexStatus is False:
+        logger.error("Index Creation Failure")
+        logHelpers.emailLogAndStatus('TEST ERROR', coreLogFile, testLogFile)
+        sys.exit(3)
 
+    # Check for sentinels and add if necessary
+    sentinelStatus = tests.createSentinels(ingestSources)
+    if sentinelStatus is False:
+        logger.error("Sentinal Creation Failure")
+        logHelpers.emailLogAndStatus('TEST ERROR', coreLogFile, testLogFile)
+        sys.exit(4)
+
+    #
+    # MAIN BODY RUN THE INGESTS
+    #
     for ingestSource in ingestSources:
         ingester = sourceNames[ingestSource]
-
-        if indexStatus is False:
-            logger.error("Index Creation Failure")
-            sys.exit(3)
         logger.info("Starting import for: " + ingestSource)
         outcome = ingester.runIngest(dry=dryRun, test=testRun)
         if outcome is False:
             logger.error("Import of " + ingestSource + " failed! Review full log")
-            logHelpers.emailLogAndStatus('ERROR', logger.baseFilename, testLogger.baseFilename, ['michael@whirl-i-gig.com, mwbenowitz@gmail.com'])
+            logHelpers.emailLogAndStatus('INGEST ERROR', logger.baseFilename, testLogger.baseFilename)
+            sys.exit(5)
         else:
             logger.info("Import of " + ingestSource + " successful!")
 
@@ -91,17 +102,21 @@ def main():
     addFullCounts = logHelpers.addFullCounts(ingestID, ingestSources)
 
     # Test for existence/well form-edness of sentinel records
-    
+    sentinelErrorStatus = tests.checkSentinels(ingestSources)
+    if sentinelErrorStatus is True:
+        logger.error("Sentinels Failed to Verify, check logs")
+        logHelpers.emailLogAndStatus('SENTINEL ERROR', coreLogFile, testLogFile)
+        sys.exit(6)
 
     # Check full counts against APIs of source providers
-    tests.checkCounts([idb, pbdb], addFullCounts)
+    tests.checkCounts(ingestSources, addFullCounts)
 
 
     endTime = time.time()
     ingestLogStatus = logHelpers.logRunTime(ingestID, startTime, endTime)
     if ingestLogStatus == False:
         logger.error("Failed to update mongo ingest log. CHECK FOR ERRORS!")
-    logHelpers.emailLogAndStatus('FINAL STATUS', coreLogFile, testLogFile, ['michael@whirl-i-gig.com, mwbenowitz@gmail.com'])
+    logHelpers.emailLogAndStatus('SUCCESS', coreLogFile, testLogFile)
     logger.info("Ingest Complete")
 
 if __name__ == '__main__':

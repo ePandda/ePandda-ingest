@@ -12,9 +12,13 @@ import json
 import mongoConnect
 
 class epanddaTests:
-    def __init__(self):
+    def __init__(self, idb, pbdb):
         self.config = json.load(open('./config.json'))
         self.logger = logging.getLogger("test.main")
+        self.sources = {
+            "idigbio": idb,
+            "pbdb": pbdb
+        }
 
     def checkIndexes(self):
         indexes = self.config['test_indexes']
@@ -38,20 +42,51 @@ class epanddaTests:
 
     def checkCounts(self, sources, fullCounts):
         for source in sources:
-            totalCount = source.getRecordCount()
+            sourceInstance = self.sources[source]
+            totalCount = sourceInstance.getRecordCount()
             if totalCount:
-                epanddaSourceTotal = fullCounts[source.source]
+                epanddaSourceTotal = fullCounts[sourceInstance.source]
                 if epanddaSourceTotal == totalCount:
                     self.logger.info("COUNTS MATCH EXACTLY")
                 elif epanddaSourceTotal > totalCount:
                     countDiff = epanddaSourceTotal - totalCount
-                    self.logger.warning("ePandda has more records than " + source.source + " by " + str(countDiff) + ". Review for possible duplicates")
+                    self.logger.warning("ePandda has more records than " + sourceInstance.source + " by " + str(countDiff) + ". Review for possible duplicates")
                 else:
                     countDiff = totalCount - epanddaSourceTotal
                     percentShared = epanddaSourceTotal / totalCount
                     if percentShared < 0.95:
-                        self.logger.info("ePandda differs from " + source.source + " by " + str(countDiff) + ". Less than 5%")
+                        self.logger.info("ePandda differs from " + sourceInstance.source + " by " + str(countDiff) + ". Less than 5%")
                     else:
-                        self.logger.warning("ePandda differs from " + source.source + " by " + str(countDiff) + ". MORE than 5%")
+                        self.logger.warning("ePandda differs from " + sourceInstance.source + " by " + str(countDiff) + ". MORE than 5%")
             else:
-                self.logger.warning("Could not get count from " + source.source + "Check records for validity")
+                self.logger.warning("Could not get count from " + sourceInstance.source + "Check records for validity")
+
+    def createSentinels(self, sources):
+        sentinelRatio = self.config['sentinel_ratio']
+        mongoConn = mongoConnect.mongoConnect()
+        for source in sources:
+            totalCount = mongoConn.getCollectionCount(source)
+            sentinelCount = mongoConn.getSentinelCount(source)
+            if sentinelCount / totalCount >= sentinelRatio:
+                self.logger.info("Sentinel Collection exists for " + source)
+            else:
+                self.logger.warning("Insuficient sentinals for " + source + " Adding new sentinels")
+                sentinalCreationResult = mongoConn.addSentinels(source, totalCount, sentinelCount)
+                if sentinalCreationResult is True:
+                    self.logger.info("Successfully created new sentinels")
+                    return True
+                else:
+                    self.logger.error("Could not create sufficient sentinels, Check database!")
+                    return False
+
+
+    def checkSentinels(self, sources):
+        mongoConn = mongoConnect.mongoConnect()
+        errorReport = False
+        for source in sources:
+            sentinelCount = mongoConn.getSentinelCount(source)
+            static, modified, missing = mongoConn.verifySentinels(source)
+            if missing > 0 or modified > (sentinelCount/10):
+                self.logger.error("Potential Issue with " + source + " flagged from sentinels")
+                errorReport = True
+        return errorReport

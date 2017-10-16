@@ -25,6 +25,7 @@ import re
 # local modules
 import mongoConnect
 from helpers import ingestHelpers
+from helpers import testHelpers
 
 class idigbio:
     def __init__(self, test, fullRefresh, ingestLog):
@@ -43,6 +44,7 @@ class idigbio:
         self.recordCountURL = "https://search.idigbio.org/v2/summary/count/records/"
         self.logger = logging.getLogger("ingest.idigbio")
         self.ingestLog = ingestLog
+        self.tests = testHelpers.epanddaTests(None, None)
 
     # This is the main component of the ingester, and relies on a few different
     # helpers. But most of this code is specific to iDigBio
@@ -55,6 +57,13 @@ class idigbio:
             ingestResult = self.runFullIngest()
         else:
             ingestResult = self.runPartialIngest()
+
+        # create Sentinel records for new records
+        sentinelStatus = self.tests.createSentinels(['idigbio'])
+        if sentinelStatus is False:
+            self.logger.error("Sentinal Creation Failure for IDB")
+            return False
+        return True
 
     def runPartialIngest(self):
         self.logger.info("Starting ingest of iDigbio records modified in past " + str(self.refreshInterval) + " days")

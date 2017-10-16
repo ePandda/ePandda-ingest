@@ -37,6 +37,22 @@ def getMd5Hash(dict):
     md5 = hashlib.md5(json.dumps(dict, sort_keys=True)).hexdigest()
     return md5
 
+def compareDocuments(source, sentinel):
+    for doc in [source, sentinel]:
+        if '_id' in doc:
+            doc.pop('_id', None)
+        for ref in ['coll_refs', 'occ_refs']:
+            if ref in doc:
+                for i in range(len(doc[ref])):
+                    if '_id' in doc[ref][i]:
+                        doc[ref][i].pop('_id', None)
+    sourceHash = getMd5Hash(source)
+    sentinelHash = getMd5Hash(sentinel)
+    if sourceHash != sentinelHash:
+        return True
+
+    return False
+
 def csvDuplicateHeaderCheck(csvFile):
     occurrenceHeader = pd.read_csv(csvFile, sep=",", nrows=1)
     occurrenceHeadList = list(occurrenceHeader.columns.values)

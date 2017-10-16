@@ -9,6 +9,26 @@
   "endpoints_db": "[destination_db]",
   "idigbio_coll": "[idigbio_collection]",
   "pbdb_coll": "[pbdb_collection]",
-  "pbdb_ingest_interval": "[days_ago]", 
+  "pbdb_ingest_interval": "[days_ago]",
   "idigbio_ingest_interval": "[days_ago]",
+  "log_db": "[ingest_log_db]",
+  "ingest_collection": "[ingest_log_collection]",
+  "sentinel_ratio": "[decimal_for_percentage_of_records_to_use_as_sentinels]",
+  "test_indexes":[
+    {
+      "db": "[db_to_test]",
+      "collection": "[collection_to_test]",
+      "indexes": ["fields_to_verify_indexes_on"]
+    }
+  ],
+  "email_recipients": [
+      "[list_of_email_addresses_for_reports]"
+  ],
+  "smtp": {
+      "server": "[email_server]",
+      "port": "[port (integer)]",
+      "user": "[email_user]",
+      "password": "[email_password]"
+  }
+}
 }

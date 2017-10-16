@@ -21,6 +21,7 @@ import logging
 # local stuff
 import mongoConnect
 from helpers import ingestHelpers
+from helpers import testHelpers
 
 class paleobio:
     def __init__(self, test, fullRefresh, ingestLog):
@@ -37,6 +38,7 @@ class paleobio:
         self.referenceURL = 'https://paleobiodb.org/data1.2/refs/list.csv?all_records&show=both&refs_modified_after=' + ingestInterval
         self.recordCountURL = 'https://paleobiodb.org/data1.2/occs/list.json?all_records&rowcount&limit=1'
         self.ingestLog = ingestLog
+        self.tests = testHelpers.epanddaTests(None, None)
 
     # This is the main component of the ingester, and relies on a few different
     # helpers. But most of this code is specific to PaleoBio
@@ -86,6 +88,13 @@ class paleobio:
             self.logger.error("There was an error ingesting new records. Halting and please review the log")
             return False
         os.remove('tmp_occurrence.json')
+
+        # Create sentinels on the ingested data
+        sentinelStatus = self.tests.createSentinels(['pbdb'])
+        if sentinelStatus is False:
+            self.logger.error("Sentinal Creation Failure for PBDB")
+            return False
+
         return True
 
     def downloadFromPBDB(self):
