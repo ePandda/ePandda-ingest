@@ -218,7 +218,6 @@ class mongoConnect:
         self.logger.debug("Checking indexes for " + collection)
         collectionName = self.config[collection]
         testCollection = self.client[db][collectionName]
-        print testCollection
         existingIndexes = testCollection.index_information()
         indexChecklist = []
         missingIndexes = []
@@ -232,6 +231,22 @@ class mongoConnect:
         if missingIndexes:
             return missingIndexes
         return True
+
+
+    def deleteIndexes(self, db, collection, indexes):
+        self.logger.debug("Checking indexes for " + collection)
+        collectionName = self.config[collection]
+        testCollection = self.client[db][collectionName]
+	for index in indexes:
+	    try: 
+		testCollection.drop_index(index)
+		self.logger.debug("Dropped " + index + " from " + collection)
+		
+	    except:
+		self.logger.error("Failed to Drop index " + index + " on collection " + collection + " Exiting ")
+		return False
+	
+	return True
 
     def createIndex(self, db, collection, indexes):
         self.logger.info("Creating missing indexes for " + collection)

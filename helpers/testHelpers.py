@@ -20,7 +20,7 @@ class epanddaTests:
             "pbdb": pbdb
         }
 
-    def checkIndexes(self):
+    def checkIndexes(self, fullRefresh, importStatus):
         indexes = self.config['test_indexes']
         mongoConn = mongoConnect.mongoConnect()
         for indexCheck in indexes:
@@ -30,14 +30,28 @@ class epanddaTests:
             indexTestResult = mongoConn.indexTest(database, collection, verifyIndexes)
 
             if indexTestResult is True:
-                self.logger.info(collection + " has all necessary indexes")
-            else:
+		if fullRefresh is False:
+                    self.logger.info(collection + " has all necessary indexes")
+		else:
+		    self.logger.info("Dropping indexes on " + collection + " for full import ")
+		    indexDropResult = mongoConn.deleteIndexes(database, collection, verifyIndexes)
+		    return indexDropResult		
+            elif fullRefresh is False:
                 self.logger.warning(collection + " is missing the following indexes. They will now be created")
                 self.logger.warning(indexTestResult)
                 indexResult = mongoConn.createIndexes(db, collection, indexTestResult)
                 if indexResult is False:
                     self.logger.warning(collection + " failed index test. Exit")
                     return False
+	    else:
+		if importStatus is 'post':
+		    self.logger.info(collection + " has not been indexed. Indexing now following full import")
+                    indexResult = mongoConn.createIndexes(db, collection, indexTestResult)
+                    if indexResult is False:
+                        self.logger.warning(collection + " failed index test. Exit")
+                        return False
+		else:
+		    self.logger.info(collection + " is not indexed, which is necessary for the full import, proceeding")
         return True
 
     def checkCounts(self, sources, fullCounts):
@@ -66,6 +80,9 @@ class epanddaTests:
         mongoConn = mongoConnect.mongoConnect()
         for source in sources:
             totalCount = mongoConn.getCollectionCount(source)
+	    if not totalCount:
+		self.logger.info("New import, no sentinals can exist yet!")
+		continue
             sentinelCount = mongoConn.getSentinelCount(source)
             if sentinelCount / totalCount >= sentinelRatio:
                 self.logger.info("Sentinel Collection exists for " + source)

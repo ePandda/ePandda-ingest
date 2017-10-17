@@ -182,13 +182,13 @@ class idigbio:
 
             # If the collection has validated, then either import the full collection or
             # import the updated specimens
-            if collectionStatus == 'new' and dryRun is False:
+            if collectionStatus == 'new':
                 self.logger.info("Doing full import of " + collectionKey)
                 fullImportResult = mongoConn.iDBFullImport(occurrenceFile, collectionKey, collectionModified)
                 if fullImportResult is False:
                     self.logger.error("Import of " + collectionKey + " Failed")
                 self.logger.info("Imported " + collectionKey)
-            elif collectionStatus == 'modified' and dryRun is False:
+            elif collectionStatus == 'modified':
                 self.logger.info("Doing partial import of " + collectionKey)
                 partialImportResult = mongoConn.iDBPartialImport(occurrenceFile, collectionKey, collectionModified, 'csv')
                 if partialImportResult is False:
@@ -279,7 +279,7 @@ class idigbio:
                 return None
         duplicateHeaders = ingestHelpers.csvDuplicateHeaderCheck(occurrenceFile)
         if duplicateHeaders:
-            csvRenameDuplicateHeaders(occurrenceFile, duplicateHeaders)
+            ingestHelpers.csvRenameDuplicateHeaders(occurrenceFile, duplicateHeaders)
         return occurrenceFile
 
     def getRecordCount(self):

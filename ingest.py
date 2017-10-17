@@ -71,7 +71,7 @@ def main():
     tests = testHelpers.epanddaTests(idb, pbdb)
 
     # Check indexes and create if necessary
-    indexStatus = tests.checkIndexes()
+    indexStatus = tests.checkIndexes(fullRefresh, 'pre')
     if indexStatus is False:
         logger.error("Index Creation Failure")
         logHelpers.emailLogAndStatus('TEST ERROR', coreLogFile, testLogFile)
@@ -97,6 +97,9 @@ def main():
             sys.exit(5)
         else:
             logger.info("Import of " + ingestSource + " successful!")
+
+    # If this was a full import, create indexes on collections 
+    indexCreationResult = testHelpers.checkIndexes(fullRefresh, 'post')
 
     # Log the current number of records in ePandda
     addFullCounts = logHelpers.addFullCounts(ingestID, ingestSources)
