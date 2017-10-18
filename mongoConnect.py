@@ -17,6 +17,7 @@ import csv
 from subprocess import Popen, PIPE, call
 import logging
 import datetime
+import math
 
 # helper module
 from helpers import ingestHelpers
@@ -55,7 +56,7 @@ class mongoConnect:
             return 'static'
 
     def iDBFullImport(self, occurrenceFile, collectionKey, collectionModified):
-        importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['idigbio_db'], '-c', self.config['idigbio_coll'], '--numInsertionWorkers', 4, '--type', 'csv', '--file', occurrenceFile, '--headerline'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['idigbio_db'], '-c', self.config['idigbio_coll'], '--numInsertionWorkers', '4', '--type', 'csv', '--file', occurrenceFile, '--headerline'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
             self.logger.error("mongoimport failed with error: " + err)
@@ -71,7 +72,7 @@ class mongoConnect:
         return True
 
     def iDBPartialImport(self, occurrenceFile, collectionKey, collectionModified, fileType):
-        importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['idigbio_db'], '-c', self.config['idigbio_coll'], '--numInsertionWorkers', 4, '--type', fileType, '--file', occurrenceFile, '--headerline', '--mode', 'upsert', '--upsertFields', 'idigbio:uuid'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['idigbio_db'], '-c', self.config['idigbio_coll'], '--numInsertionWorkers', '4', '--type', fileType, '--file', occurrenceFile, '--headerline', '--mode', 'upsert', '--upsertFields', 'idigbio:uuid'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
             self.logger.error("mongoimport failed with error: " + err)
@@ -94,7 +95,7 @@ class mongoConnect:
                 self.logger.debug(duplicateHeaders)
                 renameStatus = ingestHelpers.csvRenameDuplicateHeaders(csvFile, duplicateHeaders)
             collectionName = 'tmp_' + csvFile[:-4]
-            importArgs = ['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', collectionName, '--numInsertionWorkers', 4, '--type', 'csv', '--file', csvFile, '--headerline']
+            importArgs = ['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', collectionName, '--numInsertionWorkers', '4', '--type', 'csv', '--file', csvFile, '--headerline']
             if collectionName == 'tmp_occurrence':
                 importArgs.append('--drop')
             	self.logger.debug("Dropping existing records in " + collectionName)
@@ -160,7 +161,7 @@ class mongoConnect:
             self.logger.debug("Successfully exported temp mongo collection! " + out)
 
         self.logger.debug("Importing new contents of temporary collection with upsert")
-        importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', self.config['pbdb_coll'], '--numInsertionWorkers', 4, '--type', 'json', '--file', 'tmp_occurrence.json', '--mode', 'upsert', '--upsertFields', 'occurrence_no'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', self.config['pbdb_coll'], '--numInsertionWorkers', '4', '--type', 'json', '--file', 'tmp_occurrence.json', '--mode', 'upsert', '--upsertFields', 'occurrence_no'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
             self.logger.error("mongoimport failed with error: " + err)
@@ -318,7 +319,7 @@ class mongoConnect:
         sentinelCollection = sourceDB['sentinels']
 
         # Calculating no. of sentinels to add
-        sentinelMax = int(totalCount * self.config['sentinel_ratio'])
+        sentinelMax = int(math.ceil(totalCount * self.config['sentinel_ratio']))
         newSentinels = sentinelMax - existingSentinels
         sentinelInterval = totalCount / sentinelMax
         self.logger.debug("setting sentinel interval to " + str(sentinelInterval) + " for max " + str(newSentinels) + " sentinals")

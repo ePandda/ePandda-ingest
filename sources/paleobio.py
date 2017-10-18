@@ -32,7 +32,7 @@ class paleobio:
         if test:
             ingestInterval = '24h'
         elif fullRefresh:
-            ingestIntegral = '1900'
+            ingestInterval = '1900'
         self.occurrenceURL = 'https://paleobiodb.org/data1.2/occs/list.csv?all_records&show=full&occs_modified_after=' + ingestInterval
         self.collectionURL = 'https://paleobiodb.org/data1.2/colls/list.csv?all_records&show=full&colls_modified_after=' + ingestInterval
         self.referenceURL = 'https://paleobiodb.org/data1.2/refs/list.csv?all_records&show=both&refs_modified_after=' + ingestInterval
