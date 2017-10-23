@@ -30,23 +30,31 @@ class epanddaTests:
             indexTestResult = mongoConn.indexTest(database, collection, verifyIndexes)
 
             if indexTestResult is True:
-		if fullRefresh is False:
+		if indexCheck['dropForFull'] is False:
                     self.logger.info(collection + " has all necessary indexes")
-		else:
+		elif fullRefresh is True:
 		    self.logger.info("Dropping indexes on " + collection + " for full import ")
 		    indexDropResult = mongoConn.deleteIndexes(database, collection, verifyIndexes)
 		    return indexDropResult		
-            elif fullRefresh is False:
+		else:
+		    self.logger.info("Retaining necessary indexes for partial import")
+            elif indexCheck['dropForFull'] is False:
                 self.logger.warning(collection + " is missing the following indexes. They will now be created")
                 self.logger.warning(indexTestResult)
-                indexResult = mongoConn.createIndexes(db, collection, indexTestResult)
+                indexResult = mongoConn.createIndexes(database, collection, indexTestResult)
                 if indexResult is False:
                     self.logger.warning(collection + " failed index test. Exit")
                     return False
 	    else:
 		if importStatus is 'post':
 		    self.logger.info(collection + " has not been indexed. Indexing now following full import")
-                    indexResult = mongoConn.createIndexes(db, collection, indexTestResult)
+                    indexResult = mongoConn.createIndexes(database, collection, indexTestResult)
+                    if indexResult is False:
+                        self.logger.warning(collection + " failed index test. Exit")
+                        return False
+		elif fullRefresh is False:
+		    self.logger.info("Need indexes for partial import. Indexing now.") 
+                    indexResult = mongoConn.createIndexes(database, collection, indexTestResult)
                     if indexResult is False:
                         self.logger.warning(collection + " failed index test. Exit")
                         return False

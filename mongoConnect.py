@@ -249,7 +249,7 @@ class mongoConnect:
 	
 	return True
 
-    def createIndex(self, db, collection, indexes):
+    def createIndexes(self, db, collection, indexes):
         self.logger.info("Creating missing indexes for " + collection)
         collectionName = self.config[collection]
         targetCollection = self.client[db][collectionName]

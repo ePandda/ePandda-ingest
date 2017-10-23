@@ -80,7 +80,7 @@ def emailLogAndStatus(status, logFile, testLogFile):
     config = json.load(open('./config.json'))
     recipients = config['email_recipients']
     if len(recipients) > 1:
-        recipientString = ', ',join(recipients)
+        recipientString = ', '.join(recipients)
     else:
         recipientString = recipients[0]
     logger = logging.getLogger('ingest.mail')

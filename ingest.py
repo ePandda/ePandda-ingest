@@ -99,7 +99,7 @@ def main():
             logger.info("Import of " + ingestSource + " successful!")
 
     # If this was a full import, create indexes on collections 
-    indexCreationResult = testHelpers.checkIndexes(fullRefresh, 'post')
+    indexCreationResult = tests.checkIndexes(fullRefresh, 'post')
 
     # Log the current number of records in ePandda
     addFullCounts = logHelpers.addFullCounts(ingestID, ingestSources)
