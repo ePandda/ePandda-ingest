@@ -28,6 +28,7 @@ def createParser():
     parser.add_argument('-t', '--test', action='store_true', help="Only import a subset of records for db testing")
     parser.add_argument('-l', '--logLevel', help="Set the level of message to be logged. Options: DEBUG|INFO|WARNING|ERROR")
     parser.add_argument('-F', '--fullRefresh', action='store_true', help="Set ingest to overwrite all ePandda records and download new records from providers")
+    parser.add_argument('-D', '--removeDeleted', action='store_true', help="Set to run checks for deleted records from ingest sources and remove them from ePandda")
     return parser
 
 def getMd5Hash(dict):

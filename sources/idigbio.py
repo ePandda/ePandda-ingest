@@ -6,6 +6,7 @@
 from bs4 import BeautifulSoup
 import json
 import pandas as pd
+import csv
 
 # Data harvesting/gathering
 from unidecode import unidecode
@@ -42,7 +43,10 @@ class idigbio:
         self.refreshURL = 'https://api.idigbio.org/v2/download/?rq={"datemodified":{"type":"range","gte":"' + self.refreshFrom + '"}}'
         self.refreshDownloadURL = "http://s.idigbio.org/idigbio-downloads/"
         self.recordCountURL = "https://search.idigbio.org/v2/summary/count/records/"
+        self.deleteCheckRoot = "https://search.idigbio.org/v2/summary/stats/api?recordset="
+        self.apiDownloadRoot = "https://api.idigbio.org/v2/download/?rq="
         self.logger = logging.getLogger("ingest.idigbio")
+        self.testLogger = logging.getLogger("test.idigbio")
         self.ingestLog = ingestLog
         self.tests = testHelpers.epanddaTests(None, None)
 
@@ -77,32 +81,8 @@ class idigbio:
             self.logger.info("An ingest has already been run from this date")
             return False
 
-        # Generate the request to iDigBio for records changed in the specified range
-        modifiedStatusURL = self.generateIDBRecordRequest()
-        if modifiedStatusURL is False:
-            self.logger.error("Could not generate iDigBio update request")
-            return False
-
-        # Wait for the download file to be generated and get the download link
-        idbDownloadURL = self.getIDBDownloadURL(modifiedStatusURL)
-        if idbDownloadURL is False:
-            self.logger.error("Could not get iDigBio downloadURL")
-            return False
-
-        # Get the collectionKey for the downloaded collection
-        collectionMatch = re.search('\/([a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}.zip)$', idbDownloadURL)
-        if collectionMatch:
-            collectionKey = collectionMatch.group(1)
-
-        # Download & unzip the zip file!
-        collectionDir = self.downloadCollection(self.refreshDownloadURL, collectionKey)
-        if not collectionDir:
-            return False
-
-        # Check that we got a decent CSV/TXT file in that unzipped directory
-        # This spot checks 'core' fields from each of the main indexes we create
-        # If there they're it means that its a well formed record
-        occurrenceFile = self.checkCollection(collectionDir)
+        # Query the iDigBio API for modified records
+        occurrenceFile, collectionKey = self.idbAPIDownload(self.refreshURL)
         if not occurrenceFile:
             return False
 
@@ -204,9 +184,41 @@ class idigbio:
 
         return True
 
-    def generateIDBRecordRequest(self):
+    def idbAPIDownload(self, requestURL):
+        # Generate the request to iDigBio for records changed in the specified range
+        modifiedStatusURL = self.generateIDBRecordRequest(requestURL)
+        if modifiedStatusURL is False:
+            self.logger.error("Could not generate iDigBio update request")
+            return False
+
+        # Wait for the download file to be generated and get the download link
+        idbDownloadURL = self.getIDBDownloadURL(modifiedStatusURL)
+        if idbDownloadURL is False:
+            self.logger.error("Could not get iDigBio downloadURL")
+            return False
+
+        # Get the collectionKey for the downloaded collection
+        collectionMatch = re.search('\/([a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}.zip)$', idbDownloadURL)
+        if collectionMatch:
+            collectionKey = collectionMatch.group(1)
+
+        # Download & unzip the zip file!
+        collectionDir = self.downloadCollection(self.refreshDownloadURL, collectionKey)
+        if not collectionDir:
+            return False
+
+        # Check that we got a decent CSV/TXT file in that unzipped directory
+        # This spot checks 'core' fields from each of the main indexes we create
+        # If there they're it means that its a well formed record
+        occurrenceFile = self.checkCollection(collectionDir)
+        if not occurrenceFile:
+            return False
+
+        return occurrenceFile, collectionKey
+
+    def generateIDBRecordRequest(self, requestURL):
         try:
-            recordRequest = requests.get(self.refreshURL, timeout=10)
+            recordRequest = requests.get(requestURL, timeout=10)
         except (ConnectionError, ReadTimeout) as e:
             self.logger.error("Could not access iDigBio API")
             return False
@@ -291,3 +303,61 @@ class idigbio:
                 recordCount = recordCountBody['itemCount']
                 return recordCount
         return None
+
+    def deleteCheck(self):
+        self.logger.info("Checking for deleted records")
+
+        # open a mongo connection
+        mongoConn = mongoConnect.mongoConnect()
+        idbRecordSets = mongoConn.idbGetRecordSets()
+        mongoConn.closeConnection()
+        if not idbRecordSets:
+            self.logger.error("Could not load record sets. Check logs for error")
+            return False
+        for recordSet in idbRecordSets:
+            setID = recordSet[0]
+            setCount = recordSet[1]
+            self.logger.debug("Checking counts of " + setID)
+            apiResponse = requests.get(self.deleteCheckRoot+setID)
+            mostRecentSnapshot = datetime(1, 1, 1)
+            mostRecentSnapString = None
+            if apiResponse.status_code == 200:
+                setCountBody = apiResponse.json()
+                if 'dates' in setCountBody:
+                    for snapDate in setCountBody['dates']:
+                        snapshotDate = datetime.strptime(snapDate, "%Y-%m-%d")
+                        if snapshotDate > mostRecentSnapshot:
+                            mostRecentSnapshot = snapshotDate
+                            mostRecentSnapString = snapDate
+
+                    self.logger.debug("Got most recent date " + mostRecentSnapString)
+                    latestCount = setCountBody[mostRecentSnapString][setID]['records']
+
+                    if latestCount == setCount:
+                        self.logger.debug(setID + " matches source record count")
+                    elif latestCount > setCount:
+                        self.logger.warning(setID + " is missing records from source")
+                    else:
+                        self.logger.info(setID + " contains deleted records, deleting now")
+                        deleteResult = self.deleteRecords(setID)
+                else:
+                    self.logger.error("Could not load recordset from idigbio: " + setID)
+            else:
+                self.logger.error("Requests error " + str(apiResponse.status_code) + "for: " + setID)
+
+    def deleteRecords(self, setID):
+        specimenUUIDs = set()
+        downloadURL = self.apiDownloadRoot+'{"recordset": ' + setID + '}'
+        # Download the relevant collection from the API
+        occurrenceFile = idbAPIDownload(self.refreshURL)
+        with open(occurrenceFile, 'rb') as csvFile:
+            specimenReader = csv.reader(csvFile)
+            for specimen in specimenReader:
+                specimenUUIDs.add(specimen['idigbio:uuid'])
+
+        # open a mongo connection
+        mongoConn = mongoConnect.mongoConnect()
+        idbRecordSets = mongoConn.idbCheckAndDeleteRecords(setID, specimenUUIDs)
+
+
+        mongoConn.closeConnection()

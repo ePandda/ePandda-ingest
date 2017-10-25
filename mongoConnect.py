@@ -87,6 +87,33 @@ class mongoConnect:
             self.logger.warning("Failed to update this record in collectionStatus: " + collectionKey)
         return True
 
+    def idbGetRecordSets(self):
+        specimens = self.idigbio.specimens
+        recordSets = specimens.distinct("idigbio:recordset")
+        recordSetCounts = []
+        if not recordSets:
+            return False
+        for recordSet in recordSets:
+            setCount = specimens.find({'idigbio:recordset': recordSet}).count()
+            if not setCount:
+                self.loggger("Couldn't find idigbio recordset " + recordSet + " for counting")
+                return False
+            recordSetCounts.append((recordSet, setCount))
+
+        return recordSetCounts
+
+    def idbCheckAndDeleteRecords(self, setID, sourceUUIDs):
+        specimens = self.idigbio.specimens
+        epanddaUUIDs = set(specimens.find({'idigbio:recordset': setID}, {'idigbio:uuid': 1, '_id': -1}))
+        self.logger.debug("Comparing source and local sets for " + setID)
+        deletedSpecimens = list(sourceUUIDs ^ epanddaUUIDs)
+        if len(deleteSpecimens) > 0:
+            self.logger.info("Found " + str(len(deleteSpecimens)) + " deleted specimens in ePandda. Removing")
+            self.logger.debug(deleteSpecimens)
+        else:
+            self.logger.debug("Didn't find any missing specimens. Check recordset " + setID + "in iDigBio")
+        
+
     def pbdbIngestTmpCollections(self, csvFiles):
         for csvFile in csvFiles:
             # Checking for duplicate headers
@@ -239,14 +266,14 @@ class mongoConnect:
         collectionName = self.config[collection]
         testCollection = self.client[db][collectionName]
 	for index in indexes:
-	    try: 
+	    try:
 		testCollection.drop_index(index)
 		self.logger.debug("Dropped " + index + " from " + collection)
-		
+
 	    except:
 		self.logger.error("Failed to Drop index " + index + " on collection " + collection + " Exiting ")
 		return False
-	
+
 	return True
 
     def createIndexes(self, db, collection, indexes):

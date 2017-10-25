@@ -42,6 +42,7 @@ def main():
     testRun = args.test
     logLevel = args.logLevel
     fullRefresh = args.fullRefresh
+    removeDeleted = args.removeDeleted
 
     # Create log entry in ingest collection
     ingestID = logHelpers.createMongoLog(ingestSources)
@@ -98,8 +99,16 @@ def main():
         else:
             logger.info("Import of " + ingestSource + " successful!")
 
-    # If this was a full import, create indexes on collections 
+    # If this was a full import, create indexes on collections
     indexCreationResult = tests.checkIndexes(fullRefresh, 'post')
+
+    # If delete flag is set, scan collections for deleted records and
+    # remove any that are not in the source APIs
+    if removeDeleted:
+        for ingestSource in ingestSources:
+            ingester = sourceNames[ingestSource]
+            logger.info("Checking and removing deleted records")
+            deleteOutcome = ingester.deleteCheck()
 
     # Log the current number of records in ePandda
     addFullCounts = logHelpers.addFullCounts(ingestID, ingestSources)
