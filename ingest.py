@@ -102,6 +102,9 @@ def main():
     # If this was a full import, create indexes on collections
     indexCreationResult = tests.checkIndexes(fullRefresh, 'post')
 
+    # Check for duplicates and remove any that exist
+    tests.checkAndRemoveDuplicates(ingestSources)
+
     # If delete flag is set, scan collections for deleted records and
     # remove any that are not in the source APIs
     if removeDeleted:
@@ -117,8 +120,6 @@ def main():
     sentinelErrorStatus = tests.checkSentinels(ingestSources)
     if sentinelErrorStatus is True:
         logger.error("Sentinels Failed to Verify, check logs")
-        logHelpers.emailLogAndStatus('SENTINEL ERROR', coreLogFile, testLogFile)
-        sys.exit(6)
 
     # Check full counts against APIs of source providers
     tests.checkCounts(ingestSources, addFullCounts)

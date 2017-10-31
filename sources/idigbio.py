@@ -331,7 +331,7 @@ class idigbio:
                             mostRecentSnapString = snapDate
 
                     self.logger.debug("Got most recent date " + mostRecentSnapString)
-                    latestCount = setCountBody[mostRecentSnapString][setID]['records']
+                    latestCount = setCountBody['dates'][mostRecentSnapString][setID]['records']
 
                     if latestCount == setCount:
                         self.logger.debug(setID + " matches source record count")
@@ -349,7 +349,7 @@ class idigbio:
         specimenUUIDs = set()
         downloadURL = self.apiDownloadRoot+'{"recordset": ' + setID + '}'
         # Download the relevant collection from the API
-        occurrenceFile = idbAPIDownload(self.refreshURL)
+        occurrenceFile = self.idbAPIDownload(self.refreshURL)
         with open(occurrenceFile, 'rb') as csvFile:
             specimenReader = csv.reader(csvFile)
             for specimen in specimenReader:

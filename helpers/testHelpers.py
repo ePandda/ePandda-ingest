@@ -115,3 +115,14 @@ class epanddaTests:
                 self.logger.error("Potential Issue with " + source + " flagged from sentinels")
                 errorReport = True
         return errorReport
+
+    def checkAndRemoveDuplicates(self, sources):
+        self.logger.info("Checking for duplicate records")
+        mongoConn = mongoConnect.mongoConnect()
+        for source in sources:
+            removedDuplicates = mongoConn.deleteDuplicates(source)
+            if removedDuplicates is None:
+                self.logger.info("No duplicates found in " + source)
+            else:
+                self.logger.info(str(removedDuplicates) + " duplicate records deleted from " + source)
+            return removedDuplicates

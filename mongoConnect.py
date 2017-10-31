@@ -106,13 +106,12 @@ class mongoConnect:
         specimens = self.idigbio.specimens
         epanddaUUIDs = set(specimens.find({'idigbio:recordset': setID}, {'idigbio:uuid': 1, '_id': -1}))
         self.logger.debug("Comparing source and local sets for " + setID)
-        deletedSpecimens = list(sourceUUIDs ^ epanddaUUIDs)
+        deleteSpecimens = list(sourceUUIDs ^ epanddaUUIDs)
         if len(deleteSpecimens) > 0:
             self.logger.info("Found " + str(len(deleteSpecimens)) + " deleted specimens in ePandda. Removing")
             self.logger.debug(deleteSpecimens)
         else:
             self.logger.debug("Didn't find any missing specimens. Check recordset " + setID + "in iDigBio")
-        
 
     def pbdbIngestTmpCollections(self, csvFiles):
         for csvFile in csvFiles:
@@ -197,6 +196,32 @@ class mongoConnect:
             self.logger.info("mongoimport success! " + out)
             return True
         return True
+
+    def pbdbGetCollections(self):
+        specimens = self.pbdb.occurrences
+        collections = specimens.distinct("collection_no")
+        collectionCounts = []
+        if not collections:
+            return False
+        for collection in collections:
+            setCount = specimens.find({'collection_no': collection}).count()
+            if not setCount:
+                self.loggger("Couldn't find pbdb collection " + recordSet + " for counting")
+                return False
+            collectionCounts.append((collection, setCount))
+
+        return collectionCounts
+
+    def pbdbCheckAndDeleteRecords(self, collectionID, occurrenceIds):
+        occurrences = self.pbdb.occurrences
+        epanddaIds = set(occurrences.find({'collection_no': collectionID}, {'occurrence_no': 1, '_id': -1}))
+        self.logger.debug("Comparing source and local sets for " + collectionID)
+        deleteSpecimens = list(occurrenceIds ^ epanddaIds)
+        if len(deleteSpecimens) > 0:
+            self.logger.info("Found " + str(len(deleteSpecimens)) + " deleted specimens in ePandda. Removing")
+            self.logger.debug(deleteSpecimens)
+        else:
+            self.logger.debug("Didn't find any missing specimens. Check recordset " + collectionID + "in PBDB")
 
     def createIngestLog(self, sources):
         ingests = self.ingestLog[self.config['ingest_collection']]
@@ -413,15 +438,66 @@ class mongoConnect:
             sourceRecord = sourceCollection.find_one({'_id': sentinel['_id']})
             if not sourceRecord:
                 missingSentinels += 1
-                self.logger.warning("document " + str(sourceRecord['_id']) + " is missing")
+                self.logger.warning("document " + str(sentinel['idigbio:uuid']) + " is missing")
                 continue
             recordChanged = ingestHelpers.compareDocuments(sourceRecord, sentinel)
             if recordChanged is True:
                 modifiedSentinels += 1
-                self.logger.warning("document " + str(sourceRecord['_id']) + " has changed")
+                self.logger.warning("document " + str(sourceRecord['idigbio:uuid']) + " has changed")
                 continue
 
             staticSentinels += 1
 
         self.logger.info(str(staticSentinels) + " Sentinels Unchanged / " + str(modifiedSentinels) + " Sentinels Modified / " + str(missingSentinels) + " Sentinels Missing")
         return staticSentinels, modifiedSentinels, missingSentinels
+
+    def deleteDuplicates(self, source):
+        sourceDB = self.client[self.config[source+'_db']]
+        sourceCollection = sourceDB[self.config[source+'_coll']]
+        sourceIDField = self.config[source+'_idField']
+        modifiedField = self.config[source+'_modifiedField']
+        self.logger.info("Checking " + source + " for duplicates")
+        duplicates = list(sourceCollection.aggregate([{'$group': {'_id': '$'+sourceIDField, 'count': {'$sum': 1}}}, {'$match': {'count': {'$gt': 1}}}, {'$project': {'name': '$_id', 'count': '$count', '_id': 0}}], allowDiskUse=True, batchSize=25))
+
+        if duplicates is None:
+            self.logger.info("No duplicates found")
+            return None
+        deleteCount = 0
+        self.logger.info("Removing  " + str(len(duplicates)) + " from " + source)
+        bulk = sourceCollection.initialize_unordered_bulk_op()
+        for duplicate in duplicates:
+            self.logger.info("De-duplicating record: " + duplicate['name'])
+            records = list(sourceCollection.find({sourceIDField: duplicate['name']}))
+            records.sort(key=lambda x: (datetime.datetime.strptime(x[modifiedField][0:10], "%Y-%m-%d"), len(x)))
+            bestRecord = records.pop()
+            self.logger.debug("Best record is " + str(bestRecord['_id']))
+            for record in records:
+                self.logger.debug('Deleting ' + str(record["_id"]))
+                bulk.find({'_id': record['_id']}).remove_one()
+                deleteCount += 1
+
+                if deleteCount % 250 == 0:
+                    try:
+                        bulk_results = bulk.execute()
+                        self.logger.info("Deleted batch")
+                        self.logger.debug(bulk_results)
+                    except BulkWriteError as bwe:
+                        self.logger.error("Partial delete bulk failure!")
+                        self.logger.error(bwe.details)
+                        importError = True
+                    except InvalidOperation as io:
+                        self.logger.info("There were no records to update in this bulk ")
+                    bulk = sourceCollection.initialize_unordered_bulk_op()
+
+        if deleteCount % 250 != 0:
+            try:
+                bulk_results = bulk.execute()
+                self.logger.debug(bulk_results)
+            except BulkWriteError as bwe:
+                self.logger.error("Partial delete bulk failure!")
+                self.logger.error(bwe.details)
+                importError = True
+            except InvalidOperation as io:
+                self.logger.info("There were no records to update in this bulk ")
+
+        return deleteCount

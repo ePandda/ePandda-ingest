@@ -37,6 +37,8 @@ class paleobio:
         self.collectionURL = 'https://paleobiodb.org/data1.2/colls/list.csv?all_records&show=full&colls_modified_after=' + ingestInterval
         self.referenceURL = 'https://paleobiodb.org/data1.2/refs/list.csv?all_records&show=both&refs_modified_after=' + ingestInterval
         self.recordCountURL = 'https://paleobiodb.org/data1.2/occs/list.json?all_records&rowcount&limit=1'
+        self.collectionCountURL = 'https://paleobiodb.org/data1.2/colls/single.json?coll_id='
+        self.occurrenceDownloadURL = 'https://paleobiodb.org/data1.2/occs/list.json?coll_id='
         self.ingestLog = ingestLog
         self.tests = testHelpers.epanddaTests(None, None)
 
@@ -120,3 +122,50 @@ class paleobio:
                 recordCount = recordCountBody['records_found']
                 return recordCount
         return None
+
+    def deleteCheck(self):
+        self.logger.info("Checking PBDB for deleted records")
+
+        # open a mongo connection
+        mongoConn = mongoConnect.mongoConnect()
+        pbdbCollections = mongoConn.pbdbGetCollections()
+        mongoConn.closeConnection()
+        if not pbdbCollections:
+            self.logger.error("Could not load collections sets. Check logs for error")
+            return False
+        for collection in pbdbCollections:
+            collectionID = collection[0]
+            collectionCount = collection[1]
+            self.logger.debug("Checking counts of " + collectionID)
+            apiResponse = requests.get(self.collectionCountURL+collectionID)
+            if apiResponse.status_code == 200:
+                collectionCountBody = apiResponse.json()
+                if 'records' in collectionCountBody:
+                    record = collectionCountBody['records'][0]
+                    occurrenceCount = record['noc']
+                    if collectionCount == occurrenceCount:
+                        self.logger.debug(collectionID + " matches source record count")
+                    elif occurrenceCount > collectionCount:
+                        self.logger.warning(collectionID + " is missing records from source")
+                    else:
+                        self.logger.info(collectionID + " contains deleted records, deleting now")
+                        deleteResult = self.deleteRecords(collectionID)
+                else:
+                    self.logger.error("Could not load recordset from pbdb: " + collectionID)
+            else:
+                self.logger.error("Requests error " + str(apiResponse.status_code) + "for: " + collectionID)
+
+    def deleteRecords(self, collectionID):
+        self.logger.info("Deleting records from " + collectionID)
+        occurrenceIds = set()
+        apiResponse = requests.get(self.occurrenceDownloadURL+collectionID)
+        if apiResponse.status_code == 200:
+            collOccurrences = apiResponse.json()
+            if 'records' in collOccurrences:
+                for occurrence in collOccurrences['records']:
+                    occurrenceIds.add(occurrence['oid'][4:])
+
+        # open a mongo connection
+        mongoConn = mongoConnect.mongoConnect()
+        idbRecordSets = mongoConn.pbdbCheckAndDeleteRecords(collectionID, occurrenceIds)
+        mongoConn.closeConnection()
