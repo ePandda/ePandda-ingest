@@ -146,37 +146,32 @@ class idigbio:
             collectionModified = mostRecentModified
             collectionSize = mostRecentSize
 
-            collectionStatus = multiConn.checkIDBCollectionStatus(collectionKey, collectionModified)
-            if collectionStatus == 'static':
-                self.logger.debug("Skipping collection " + collectionKey + " no new dumps since last run")
-                continue
+        # Download & unzip the zip file!
+        collectionDir = self.downloadCollection(self.collectionRoot, collectionKey)
+        if not collectionDir:
+            continue
 
-            # Download & unzip the zip file!
-            collectionDir = self.downloadCollection(self.collectionRoot, collectionKey)
-            if not collectionDir:
-                continue
+        # Check that we got a decent CSV/TXT file in that unzipped directory
+        # This spot checks 'core' fields from each of the main indexes we create
+        # If there they're it means that its a well formed record
+        occurrenceFile = self.checkCollection(collectionDir)
+        if not occurrenceFile:
+            continue
 
-            # Check that we got a decent CSV/TXT file in that unzipped directory
-            # This spot checks 'core' fields from each of the main indexes we create
-            # If there they're it means that its a well formed record
-            occurrenceFile = self.checkCollection(collectionDir)
-            if not occurrenceFile:
-                continue
+        # Get the count of records being imported and store it in the ingest log
+        recordCount = ingestHelpers.csvCountRows(occurrenceFile)
+        recordCountResult = multiConn.addToIngestCount(self.ingestLog, self.source, recordCount)
+        if recordCountResult is False:
+            self.logger.error("Could not log record count. Check validity carefully!")
 
-            # Get the count of records being imported and store it in the ingest log
-            recordCount = ingestHelpers.csvCountRows(occurrenceFile)
-            recordCountResult = multiConn.addToIngestCount(self.ingestLog, self.source, recordCount)
-            if recordCountResult is False:
-                self.logger.error("Could not log record count. Check validity carefully!")
+        # TODO Image check and merge
 
-            # TODO Image check and merge
-
-            # If the collection has validated, then either import the full collection or
-            # import the updated specimens
-            self.logger.info("Doing full import of " + collectionKey)
-            fullImportResult = multiConn.iDBFullImport(occurrenceFile, collectionKey, collectionModified)
-            if fullImportResult is False:
-                self.logger.error("Import of " + collectionKey + " Failed")
+        # If the collection has validated, then either import the full collection or
+        # import the updated specimens
+        self.logger.info("Doing full import of " + collectionKey)
+        fullImportResult = multiConn.iDBFullImport(occurrenceFile, collectionKey, collectionModified)
+        if fullImportResult is False:
+            self.logger.error("Import of " + collectionKey + " Failed")
             self.logger.info("Imported " + collectionKey)
 
             self.logger.debug("Deleting " + collectionKey + " & " + collectionDir)

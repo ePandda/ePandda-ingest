@@ -1,4 +1,8 @@
 {
+  "elastic_host": "[elasticsearch_url]",
+  "elastic_mapping": "[doc_type_mappings_path]",
+  "idigbio_endpoint": "[idigbio_doc_type]",
+  "pbdb_endpoint": "[pbdb_doc_type]",
   "auth_secret": "[secretkey]",
   "mongodb_host": "mongohost:port",
   "mongodb_user": "[mongo_user]",
