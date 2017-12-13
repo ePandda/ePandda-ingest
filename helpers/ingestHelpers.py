@@ -54,6 +54,35 @@ def compareDocuments(source, sentinel):
 
     return False
 
+def idbCleanGeoPoints(occurrenceFile):
+    tempCSV = NamedTemporaryFile(delete=False)
+    with open(occurrenceFile, 'rb') as csvFile, tempCSV:
+        reader = csv.reader(csvFile)
+        writer = csv.writer(tempCSV)
+        header = True
+        for row in reader:
+            if header:
+                geoCell = row.index('idigbio:geoPoint')
+                header = False
+                continue
+            if row[geoCell]:
+                row[geoCell] = json.loads(row[geoCell])
+            writer.writerow(row)
+    shutil.move(tempCSV.name, occurrenceFile)
+
+def pbdbCleanGeoPoints(occurrenceFile):
+    tempJSON = NamedTemporaryFile(delete=False)
+    with open(occurrenceFile, 'rb') as jsonFile:
+        reader = json.load(jsonFile)
+        for row in reader:
+            row.pop("_id")
+            if row['lat'] and row['lng']:
+                row['geoPoint'] = [row['lat'], row['lng']]
+            if row['paleolat'] and row['paleolng']:
+                row['paleoGeoPoint'] = [row['paleolat'], row['paleolng']]
+        json.dump(reader, tempJSON)
+    shutil.move(tempJSON.name, occurrenceFile)
+
 def csvDuplicateHeaderCheck(csvFile):
     occurrenceHeader = pd.read_csv(csvFile, sep=",", nrows=1)
     occurrenceHeadList = list(occurrenceHeader.columns.values)

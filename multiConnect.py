@@ -8,6 +8,8 @@ from pymongo import MongoClient
 import pymongo
 from pymongo.errors import BulkWriteError, InvalidOperation
 from bson import ObjectId
+# ElasticSearch too now
+from elasticsearch import Elasticsearch, helpers
 
 # data tools
 import json
@@ -15,6 +17,7 @@ import csv
 
 # sys tools
 from subprocess import Popen, PIPE, call
+import shutil
 import logging
 import datetime
 import math
@@ -22,12 +25,17 @@ import math
 # helper module
 from helpers import ingestHelpers
 
-class mongoConnect:
+class multiConnect:
     def __init__(self):
         self.config = json.load(open('./config.json'))
         self.client = MongoClient("mongodb://" + self.config['mongodb_user'] + ":" + self.config['mongodb_password'] + "@" + self.config['mongodb_host'])
-        self.idigbio = self.client[self.config['idigbio_db']]
-        self.pbdb = self.client[self.config['pbdb_db']]
+        self.elastic = self.config['elastic_host']
+        self.esClient = Elasticsearch(self.elastic)
+        self.idigbio = self.config['idigbio_endpoint']
+        self.pbdb = self.config['pbdb_endpoint']
+        self.idigbio_db = self.client[self.config['idigbio_db']]
+        self.pbdb_db = self.client[self.config['pbdb_db']]
+        self.indexMapping = self.config['elastic_mapping']
         self.ingestLog = self.client[self.config['log_db']]
         self.endpoints = self.client[self.config['endpoints_db']]
         self.logger = logging.getLogger("ingest.mongoConnection")
@@ -45,7 +53,7 @@ class mongoConnect:
         # new = This is a new collection
         # modified = This collection has been modified since the last ingest
         # static = This collection has not changed since last ingest
-        collCollection = self.idigbio.collectionStatus
+        collCollection = self.idigbio_db.collectionStatus
 
         collStatus = collCollection.find_one({'collection': collectionKey})
         if not collStatus:
@@ -56,13 +64,16 @@ class mongoConnect:
             return 'static'
 
     def iDBFullImport(self, occurrenceFile, collectionKey, collectionModified):
-        importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['idigbio_db'], '-c', self.config['idigbio_coll'], '--numInsertionWorkers', '4', '--type', 'csv', '--file', occurrenceFile, '--headerline'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        self.logger.debug("Formating GeoPoints for " + occurrenceFile)
+        ingestHelpers.idbCleanGeoPoints(occurrenceFile)
+        self.logger.debug("Importing collection " + occurrenceFile + "into Elastic")
+        importCall = Popen(['elasticsearch_loader', '--es-host', self.elastic, '--index', 'endpoint', '--type', self.idigbio, '--id-field', 'idigbio:uuid', 'csv', occurrenceFile], stdin=PIPE, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
-            self.logger.error("mongoimport failed with error: " + err)
+            self.logger.error("elastic import failed with error: " + err)
             return False
         else:
-            self.logger.info("mongoimport success! " + out)
+            self.logger.info("elastic import success! " + out)
         collCollection = self.idigbio.collectionStatus
         updateStatus = collCollection.update({'collection': collectionKey}, {'$set': {'collection': collectionKey, 'modifiedDate': collectionModified}}, upsert=True)
         if collCollection:
@@ -70,48 +81,26 @@ class mongoConnect:
         else:
             self.logger.warning("Failed to update this record in collectionStatus: " + collectionKey)
         return True
+
 
     def iDBPartialImport(self, occurrenceFile, collectionKey, collectionModified, fileType):
-        importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['idigbio_db'], '-c', self.config['idigbio_coll'], '--numInsertionWorkers', '4', '--type', fileType, '--file', occurrenceFile, '--headerline', '--mode', 'upsert', '--upsertFields', 'idigbio:uuid'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        self.logger.debug("Formating GeoPoints for " + occurrenceFile)
+        ingestHelpers.idbCleanGeoPoints(occurrenceFile)
+        self.logger.debug("Importing collection " + occurrenceFile + "into Elastic")
+        importCall = Popen(['elasticsearch_loader', '--es-host', self.elastic, '--index', 'endpoint', '--type', self.idigbio, '--id-field', 'idigbio:uuid', 'csv', occurrenceFile], stdin=PIPE, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
-            self.logger.error("mongoimport failed with error: " + err)
+            self.logger.error("elastic import failed with error: " + err)
             return False
         else:
-            self.logger.info("mongoimport success! " + out)
-        collCollection = self.idigbio.collectionStatus
+            self.logger.info("elastic import success! " + out)
+        collCollection = self.idigbio_db.collectionStatus
         updateStatus = collCollection.update({'collection': collectionKey}, {'$set': {'collection': collectionKey, 'modifiedDate': collectionModified}}, upsert=True)
         if collCollection:
             self.logger.debug("Added/updated collection entry in collectionStatus for " + collectionKey)
         else:
             self.logger.warning("Failed to update this record in collectionStatus: " + collectionKey)
         return True
-
-    def idbGetRecordSets(self):
-        specimens = self.idigbio.specimens
-        recordSets = specimens.distinct("idigbio:recordset")
-        recordSetCounts = []
-        if not recordSets:
-            return False
-        for recordSet in recordSets:
-            setCount = specimens.find({'idigbio:recordset': recordSet}).count()
-            if not setCount:
-                self.loggger("Couldn't find idigbio recordset " + recordSet + " for counting")
-                return False
-            recordSetCounts.append((recordSet, setCount))
-
-        return recordSetCounts
-
-    def idbCheckAndDeleteRecords(self, setID, sourceUUIDs):
-        specimens = self.idigbio.specimens
-        epanddaUUIDs = set(specimens.find({'idigbio:recordset': setID}, {'idigbio:uuid': 1, '_id': -1}))
-        self.logger.debug("Comparing source and local sets for " + setID)
-        deleteSpecimens = list(sourceUUIDs ^ epanddaUUIDs)
-        if len(deleteSpecimens) > 0:
-            self.logger.info("Found " + str(len(deleteSpecimens)) + " deleted specimens in ePandda. Removing")
-            self.logger.debug(deleteSpecimens)
-        else:
-            self.logger.debug("Didn't find any missing specimens. Check recordset " + setID + "in iDigBio")
 
     def pbdbIngestTmpCollections(self, csvFiles):
         for csvFile in csvFiles:
@@ -140,9 +129,9 @@ class mongoConnect:
 
     def pbdbMergeTmpCollections(self, occurrence, collection, reference):
         self.logger.debug("Getting unique collection_no values from occurrences")
-        occurrenceCollection = self.pbdb[occurrence]
-        collectionCollection = self.pbdb[collection]
-        referenceCollection = self.pbdb[reference]
+        occurrenceCollection = self.pbdb_db[occurrence]
+        collectionCollection = self.pbdb_db[collection]
+        referenceCollection = self.pbdb_db[reference]
 
         # Creating a few basic indexes speeds this process up
         occurrenceCollection.create_index("collection_no")
@@ -178,7 +167,7 @@ class mongoConnect:
         self.logger.info("Merging new PaleoBio data")
 
         self.logger.debug("Exporting contents of temporary collection")
-        exportCall = Popen(['mongoexport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', 'tmp_occurrence', '--type', 'json', '-o', 'tmp_occurrence.json'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        exportCall = Popen(['mongoexport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', 'tmp_occurrence', '--type', 'json', '--jsonArray', '-o', 'tmp_occurrence.json'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
         out, err = exportCall.communicate()
         if exportCall.returncode != 0:
             self.logger.error("mongoexport failed with error: " + err)
@@ -186,8 +175,10 @@ class mongoConnect:
         else:
             self.logger.debug("Successfully exported temp mongo collection! " + out)
 
-        self.logger.debug("Importing new contents of temporary collection with upsert")
-        importCall = Popen(['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', self.config['pbdb_coll'], '--numInsertionWorkers', '4', '--type', 'json', '--file', 'tmp_occurrence.json', '--mode', 'upsert', '--upsertFields', 'occurrence_no'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        self.logger.debug("Formating GeoPoints for " + tmp_occurrence)
+        ingestHelpers.pbdbCleanGeoPoints(tmp_occurrence)
+        self.logger.debug("Importing collection " + tmp_occurrence + "into Elastic")
+        importCall = Popen(['elasticsearch_loader', '--es-host', self.elastic, '--index', 'endpoint', '--type', self.pbdb, '--id-field', 'occurrence_no', 'json', tmp_occurrence], stdin=PIPE, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
             self.logger.error("mongoimport failed with error: " + err)
@@ -197,31 +188,66 @@ class mongoConnect:
             return True
         return True
 
-    def pbdbGetCollections(self):
-        specimens = self.pbdb.occurrences
-        collections = specimens.distinct("collection_no")
+    def getCollectionCounts(self, docType, collectionField):
+        setAggregation = {
+            "size": 0,
+            "query":{
+                "type": {
+                    "value": docType
+                }
+            },
+            "aggs": {
+                "sets":{
+                    "terms": {
+                        "field": collectionField,
+                        "size": 2000
+                    }
+                }
+            }
+        }
+        recordSets = self.esClient.search(index='endpoint', body=setAggregation)
         collectionCounts = []
-        if not collections:
+        if not recordSets:
             return False
-        for collection in collections:
-            setCount = specimens.find({'collection_no': collection}).count()
+        for recordSet in recordSets['aggregations']['sets']:
+            setCount = recordSet['doc_count']
             if not setCount:
-                self.loggger("Couldn't find pbdb collection " + recordSet + " for counting")
+                self.loggger("Couldn't find " + docType + " recordset " + recordSet + " for counting")
                 return False
-            collectionCounts.append((collection, setCount))
-
+            collectionCounts.append((recordSet, setCount))
         return collectionCounts
 
-    def pbdbCheckAndDeleteRecords(self, collectionID, occurrenceIds):
-        occurrences = self.pbdb.occurrences
-        epanddaIds = set(occurrences.find({'collection_no': collectionID}, {'occurrence_no': 1, '_id': -1}))
-        self.logger.debug("Comparing source and local sets for " + collectionID)
-        deleteSpecimens = list(occurrenceIds ^ epanddaIds)
+    def checkAndDeleteRecords(self, groupID, recordIDs, idField, docType):
+        resultTop = totalResults = offset = 0
+        epanddaIDs = set()
+        while resultTop <= totalResults:
+            setSearch = {
+                "_source": False,
+                "size": 1000,
+                "from": offset,
+                "query":{
+                    "term": {
+                        idField: groupID
+                    },
+                    "type": {
+                        "value": docType
+                    }
+                }
+            }
+            setIDs = self.esClient.search(index='endpoint', query=setSearch)
+            for specimen in setIDs['hits']['hits']:
+                epanddaIDs.add(specimen['_id'])
+            if totalResults == 0:
+                totalResults = setIDs['hits']['total']
+            resultTop += 1000
+            offset += 1000
+        self.logger.debug("Comparing source and local sets for " + setID)
+        deleteSpecimens = list(sourceIDs ^ epanddaIDs)
         if len(deleteSpecimens) > 0:
             self.logger.info("Found " + str(len(deleteSpecimens)) + " deleted specimens in ePandda. Removing")
             self.logger.debug(deleteSpecimens)
         else:
-            self.logger.debug("Didn't find any missing specimens. Check recordset " + collectionID + "in PBDB")
+            self.logger.debug("Didn't find any duplicate specimens. Check recordset " + setID + " in " + docType)
 
     def createIngestLog(self, sources):
         ingests = self.ingestLog[self.config['ingest_collection']]
@@ -250,9 +276,9 @@ class mongoConnect:
             return False
 
     def getCollectionCount(self, source):
-        sourceDB = self.client[self.config[source+'_db']]
-        sourceCollection = sourceDB[self.config[source+'_coll']]
-        totalCount = sourceCollection.find({}).count()
+        fullResultQuery = {"size": 0, "query": {"match_all": {}}}
+        countResults = self.esClient.search(index='endpoint', doc_type=source, body=fullResultQuery)
+        totalCount = countResults['hits']['total']
         return totalCount
 
     def addLogCount(self, ingestID, source):
@@ -267,98 +293,6 @@ class mongoConnect:
             self.logger.warning("Could not add total count to ingest log!")
             return False
 
-    def indexTest(self, db, collection, indexes):
-        self.logger.debug("Checking indexes for " + collection)
-        collectionName = self.config[collection]
-        testCollection = self.client[db][collectionName]
-        existingIndexes = testCollection.index_information()
-        indexChecklist = []
-        missingIndexes = []
-        for indexID in existingIndexes:
-            indexName = existingIndexes[indexID]['key'][0][0]
-            self.logger.debug("Adding record for index " + indexName)
-            indexChecklist.append(indexName)
-        for index in indexes:
-            if index not in indexChecklist:
-                missingIndexes.append(index)
-        if missingIndexes:
-            return missingIndexes
-        return True
-
-
-    def deleteIndexes(self, db, collection, indexes):
-        self.logger.debug("Checking indexes for " + collection)
-        collectionName = self.config[collection]
-        testCollection = self.client[db][collectionName]
-	for index in indexes:
-	    try:
-		testCollection.drop_index(index)
-		self.logger.debug("Dropped " + index + " from " + collection)
-
-	    except:
-		self.logger.error("Failed to Drop index " + index + " on collection " + collection + " Exiting ")
-		return False
-
-	return True
-
-    def createIndexes(self, db, collection, indexes):
-        self.logger.info("Creating missing indexes for " + collection)
-        collectionName = self.config[collection]
-        targetCollection = self.client[db][collectionName]
-        for index in indexes:
-            try:
-                targetCollection.create_index(index)
-                self.logger.info("Created index " + index + " on " + collection)
-            except:
-                self.logger.error("Failed to create index " + index + " on " + collection)
-                return False
-        return True
-
-    # This method is going to be deprecated as unecessary!
-    # TODO DELETE once confirmed that we can just use upsert on records
-    def generalPartialImport(self, reader, sourceType, idField, mongoCollection):
-        for row in reader:
-            recordId = row[idField]
-            rowHash = ingestHelpers.getMd5Hash(row)
-            recordHashes[recordId] = {'hash': rowHash, 'row': rowCount}
-            recordIds.append(recordId)
-            rowCount += 1
-            if rowCount % 500 == 0:
-                self.logger.info("Batch importing 500 records")
-                bulkCount += 1
-                mongoRecords = mongoCollection.find({idField: {'$in': recordIds}}, {'_id': 0})
-                bulk = mongoCollection.initialize_unordered_bulk_op()
-                for record in mongoRecords:
-                    checkRecordId = record[idField]
-                    if checkRecordId in recordHashes:
-                        checkHash = ingestHelpers.getMd5Hash(record)
-                        if recordHashes[checkRecordId]['hash'] != checkHash:
-                            bulk.find({idField: checkUUID}).upsert().update({'$set': reader[recordHashes[checkRecordId]['row']]})
-                    else:
-                        bulk.insert(occReader[recordHashes[checkRecordId]['row']])
-                try:
-                    bulk_results = bulk.execute()
-                    self.logger.debug(bulk_results)
-                except BulkWriteError as bwe:
-                    self.logger.error("Partial import bulk failure in Batch" + str(bulkCount) + "!")
-                    self.logger.error(bwe.details)
-                    importError = True
-                except InvalidOperation as io:
-                    self.logger.info("There were no records to update in Batch " + str(bulkCount))
-        if rowCount % 500 != 0:
-            bulkCount += 1
-            try:
-                bulk_results = bulk.execute()
-                self.logger.debug(bulk_results)
-            except BulkWriteError as bwe:
-                self.logger.error("Partial import bulk failure in Batch" + str(bulkCount) + "!")
-                self.logger.error(bwe.details)
-                importError = True
-            except InvalidOperation as io:
-                self.logger.info("There were no records to update in Batch " + str(bulkCount))
-
-        return importError
-
     def getSentinelCount(self, source):
         sourceDB = self.client[self.config[source+'_db']]
         sentinelCollection = sourceDB['sentinels']
@@ -366,10 +300,6 @@ class mongoConnect:
         return totalCount
 
     def addSentinels(self, source, totalCount, existingSentinels):
-        sourceDB = self.client[self.config[source+'_db']]
-        sourceCollection = sourceDB[self.config[source+'_coll']]
-        sentinelCollection = sourceDB['sentinels']
-
         # Calculating no. of sentinels to add
         sentinelMax = int(math.ceil(totalCount * self.config['sentinel_ratio']))
         newSentinels = sentinelMax - existingSentinels
@@ -383,26 +313,27 @@ class mongoConnect:
         sentinelCount = 0
         bulk = sentinelCollection.initialize_unordered_bulk_op()
         while sentinelCount < newSentinels:
-            sentinelCursor = sourceCollection.find({'_id': {'$gt': lastSentinelID}}).skip(sentinelInterval).limit(1)
-            try:
-                newSentinel = sentinelCursor.next()
-            except StopIteration:
+            sentinelQuery = {
+                "size": 1,
+                "from": sentinelInterval
+            }
+            addSentinel = self.esClient.search(index='endpoint', doc_type=source, body=sentinelQuery)
+            for newSentinal in addSentinel['hits']['hits']:
+                bulk.find({'_id': newSentinel['_source']['_id']}).upsert().update({'$set': newSentinel['_source']})
+                lastSentinelID = newSentinel['_source']['_id']
                 sentinelCount += 1
-                continue
-            bulk.find({'_id': newSentinel['_id']}).upsert().update({'$set': newSentinel})
-            lastSentinelID = newSentinel['_id']
-            sentinelCount += 1
-            if sentinelCount % 250 == 0:
-                try:
-                    bulk_results = bulk.execute()
-                    self.logger.debug(bulk_results)
-                except BulkWriteError as bwe:
-                    self.logger.error("Partial import bulk failure for these Sentinels")
-                    self.logger.error(bwe.details)
-                    importError = True
-                except InvalidOperation as io:
-                    self.logger.info("There were no records to update in Sentinels")
-                bulk = sentinelCollection.initialize_unordered_bulk_op()
+                sentinelInterval += sentinelInterval
+                if sentinelCount % 250 == 0:
+                    try:
+                        bulk_results = bulk.execute()
+                        self.logger.debug(bulk_results)
+                    except BulkWriteError as bwe:
+                        self.logger.error("Partial import bulk failure for these Sentinels")
+                        self.logger.error(bwe.details)
+                        importError = True
+                    except InvalidOperation as io:
+                        self.logger.info("There were no records to update in Sentinels")
+                    bulk = sentinelCollection.initialize_unordered_bulk_op()
 
         if sentinelCount % 250 != 0:
             try:
@@ -435,15 +366,22 @@ class mongoConnect:
                 sentinelBatch += 1
                 self.logger.info("Processing Sentinel Batch " + str(sentinelBatch))
             sentinelCount += 1
-            sourceRecord = sourceCollection.find_one({'_id': sentinel['_id']})
+            sentinelQuery = {
+                "term":{
+                    "size": 1,
+                    "_id": sentinel['_id']
+                }
+            }
+            sourceRecords = self.esClient.search(index='endpoint', body=sentinelQuery)
+            sourceRecord = sourceRecords['hits']['hits'][0]['_source']
             if not sourceRecord:
                 missingSentinels += 1
-                self.logger.warning("document " + str(sentinel['idigbio:uuid']) + " is missing")
+                self.logger.warning("document " + str(sentinel['_id']) + " is missing")
                 continue
             recordChanged = ingestHelpers.compareDocuments(sourceRecord, sentinel)
             if recordChanged is True:
                 modifiedSentinels += 1
-                self.logger.warning("document " + str(sourceRecord['idigbio:uuid']) + " has changed")
+                self.logger.warning("document " + str(sentinel['_id']) + " has changed")
                 continue
 
             staticSentinels += 1
@@ -457,47 +395,39 @@ class mongoConnect:
         sourceIDField = self.config[source+'_idField']
         modifiedField = self.config[source+'_modifiedField']
         self.logger.info("Checking " + source + " for duplicates")
-        duplicates = list(sourceCollection.aggregate([{'$group': {'_id': '$'+sourceIDField, 'count': {'$sum': 1}}}, {'$match': {'count': {'$gt': 1}}}, {'$project': {'name': '$_id', 'count': '$count', '_id': 0}}], allowDiskUse=True, batchSize=25))
-
-        if duplicates is None:
+        duplicateQuery = {
+            "size": 0,
+            "aggs": {
+                "duplicateCount": {
+                    "terms":{
+                        "field": "_id",
+                        "min_doc_count": 2
+                    },
+                    "aggs":{
+                        "duplicateDocuments": {
+                            "top_hits": {}
+                        }
+                    }
+                }
+            }
+        }
+        duplicates = self.esClient.search(index='endpoint', doc_type='source', body=duplicateQuery)
+        if duplicates['hits']['total'] == 0:
             self.logger.info("No duplicates found")
             return None
         deleteCount = 0
         self.logger.info("Removing  " + str(len(duplicates)) + " from " + source)
-        bulk = sourceCollection.initialize_unordered_bulk_op()
-        for duplicate in duplicates:
-            self.logger.info("De-duplicating record: " + duplicate['name'])
-            records = list(sourceCollection.find({sourceIDField: duplicate['name']}))
-            records.sort(key=lambda x: (datetime.datetime.strptime(x[modifiedField][0:10], "%Y-%m-%d"), len(x)))
-            bestRecord = records.pop()
+        for dupes in duplicates['aggregrations']['duplicateCount']['buckets']:
+            duplicateArray = [dupe['_source'] for dupe in dupes['duplicateDocuments']['hits']['hits']]
+            self.logger.info("De-duplicating record: " + dupe['key'])
+            duplicateArray.sort(key=lambda x: (datetime.datetime.strptime(x[modifiedField][0:10], "%Y-%m-%d"), len(x)))
+            bestRecord = duplicateArray.pop()
             self.logger.debug("Best record is " + str(bestRecord['_id']))
-            for record in records:
-                self.logger.debug('Deleting ' + str(record["_id"]))
-                bulk.find({'_id': record['_id']}).remove_one()
+            for record in duplicateArray:
+                self.logger.debug('Deleting ' + str(record[sourceIDField]))
+                deleteResult = self.esClient.delete(index='endpoint', doc_type=source, id=record[sourceIDField])
+                if deleteResult['result'] != 'deleted':
+                    self.logger.error("FAILED TO DELETE " + record[sourceIDField])
+                self.logger.info("Deleted duplicate " + record[sourceIDField])
                 deleteCount += 1
-
-                if deleteCount % 250 == 0:
-                    try:
-                        bulk_results = bulk.execute()
-                        self.logger.info("Deleted batch")
-                        self.logger.debug(bulk_results)
-                    except BulkWriteError as bwe:
-                        self.logger.error("Partial delete bulk failure!")
-                        self.logger.error(bwe.details)
-                        importError = True
-                    except InvalidOperation as io:
-                        self.logger.info("There were no records to update in this bulk ")
-                    bulk = sourceCollection.initialize_unordered_bulk_op()
-
-        if deleteCount % 250 != 0:
-            try:
-                bulk_results = bulk.execute()
-                self.logger.debug(bulk_results)
-            except BulkWriteError as bwe:
-                self.logger.error("Partial delete bulk failure!")
-                self.logger.error(bwe.details)
-                importError = True
-            except InvalidOperation as io:
-                self.logger.info("There were no records to update in this bulk ")
-
         return deleteCount

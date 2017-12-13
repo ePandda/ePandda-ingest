@@ -19,7 +19,7 @@ import shutil
 import logging
 
 # local stuff
-import mongoConnect
+import multiConnect
 from helpers import ingestHelpers
 from helpers import testHelpers
 
@@ -57,11 +57,11 @@ class paleobio:
         self.logger.info("Completed paleobio download")
 
         # open a mongo connection
-        mongoConn = mongoConnect.mongoConnect()
+        multiConn = multiConnect.multiConnect()
         downloadedFiles = ['occurrence.csv', 'collection.csv', 'reference.csv']
         # Ingest records into temporary mongo collections for easier merging
         self.logger.info("Creating ingest collections")
-        tmpCollectionResults = mongoConn.pbdbIngestTmpCollections(downloadedFiles)
+        tmpCollectionResults = multiConn.pbdbIngestTmpCollections(downloadedFiles)
         if tmpCollectionResults is False:
             self.logger.error("Could not create all necessary mongo collections. Halting")
             return False
@@ -69,7 +69,7 @@ class paleobio:
 
         # Get the count of records being imported and store it in the ingest log
         recordCount = ingestHelpers.csvCountRows('occurrence.csv')
-        recordCountResult = mongoConn.addToIngestCount(self.ingestLog, self.source, recordCount)
+        recordCountResult = multiConn.addToIngestCount(self.ingestLog, self.source, recordCount)
         if recordCountResult is False:
             self.logger.error("Could not log record count. Check validity carefully!")
 
@@ -78,14 +78,14 @@ class paleobio:
             self.logger.debug("Deleted source file: " + csvFile)
         # Merge collections and references into occurrence collection
         self.logger.info("Merging temporary collections")
-        mergeResult = mongoConn.pbdbMergeTmpCollections('tmp_occurrence', 'tmp_collection', 'tmp_reference')
+        mergeResult = multiConn.pbdbMergeTmpCollections('tmp_occurrence', 'tmp_collection', 'tmp_reference')
         if mergeResult is False:
             self.logger.error("Could not merge PaleoBio collections. Halting")
             return False
         self.logger.info("Created merged dataset")
 
         # Merge new data into main pbdb collection
-        ingestResult = mongoConn.pbdbMergeNewData('tmp_occurrence')
+        ingestResult = multiConn.pbdbMergeNewData('tmp_occurrence.json')
         if ingestResult is False:
             self.logger.error("There was an error ingesting new records. Halting and please review the log")
             return False
@@ -127,9 +127,9 @@ class paleobio:
         self.logger.info("Checking PBDB for deleted records")
 
         # open a mongo connection
-        mongoConn = mongoConnect.mongoConnect()
-        pbdbCollections = mongoConn.pbdbGetCollections()
-        mongoConn.closeConnection()
+        multiConn = multiConnect.multiConnect()
+        pbdbCollections = multiConn.getCollectionCounts('pbdb', 'occurrence_no')
+        multiConn.closeConnection()
         if not pbdbCollections:
             self.logger.error("Could not load collections sets. Check logs for error")
             return False
@@ -166,6 +166,6 @@ class paleobio:
                     occurrenceIds.add(occurrence['oid'][4:])
 
         # open a mongo connection
-        mongoConn = mongoConnect.mongoConnect()
-        idbRecordSets = mongoConn.pbdbCheckAndDeleteRecords(collectionID, occurrenceIds)
-        mongoConn.closeConnection()
+        multiConn = multiConnect.multiConnect()
+        idbRecordSets = multiConn.checkAndDeleteRecords(collectionID, occurrenceIds, 'collection_no', 'pbdb')
+        multiConn.closeConnection()

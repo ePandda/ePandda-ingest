@@ -24,7 +24,7 @@ import time
 import re
 
 # local modules
-import mongoConnect
+import multiConnect
 from helpers import ingestHelpers
 from helpers import testHelpers
 
@@ -60,7 +60,7 @@ class idigbio:
         if self.fullRefresh:
             ingestResult = self.runFullIngest()
         else:
-            ingestResult = self.runPartialIngest()
+            ingestResult = self.runPartialIngest(self.refreshInterval, self.refreshFrom)
 
         # create Sentinel records for new records
         sentinelStatus = self.tests.createSentinels(['idigbio'])
@@ -69,14 +69,14 @@ class idigbio:
             return False
         return True
 
-    def runPartialIngest(self):
-        self.logger.info("Starting ingest of iDigbio records modified in past " + str(self.refreshInterval) + " days")
+    def runPartialIngest(self, refreshInterval, refreshFrom):
+        self.logger.info("Starting ingest of idigbio records modified in past " + str(refreshInterval) + " days")
 
         # open a mongo connection
-        mongoConn = mongoConnect.mongoConnect()
-        collectionName = 'iDigBio_ingest_' + self.refreshFrom
+        multiConn = multiConnect.multiConnect()
+        collectionName = 'iDigBio_ingest_' + refreshFrom
         # Check if the collection has already been updated for this date
-        refreshStatus = mongoConn.checkIDBCollectionStatus(collectionName, self.refreshFrom)
+        refreshStatus = multiConn.checkIDBCollectionStatus(collectionName, refreshFrom)
         if refreshStatus == 'static':
             self.logger.info("An ingest has already been run from this date")
             return False
@@ -88,12 +88,12 @@ class idigbio:
 
         # Get the count of records being imported and store it in the ingest log
         recordCount = ingestHelpers.csvCountRows(occurrenceFile)
-        recordCountResult = mongoConn.addToIngestCount(self.ingestLog, self.source, recordCount)
+        recordCountResult = multiConn.addToIngestCount(self.ingestLog, self.source, recordCount)
         if recordCountResult is False:
             self.logger.error("Could not log record count. Check validity carefully!")
 
         # Download and ingest the created iDigBio file
-        ingestResult = mongoConn.iDBPartialImport(occurrenceFile, collectionName, self.refreshFrom, 'csv')
+        ingestResult = multiConn.iDBPartialImport(occurrenceFile, collectionName, self.refreshFrom, 'csv')
         if ingestResult is False:
             self.logger.error("There were at least some errors during import of " + collectionKey)
             print "Imported with at least some errors"
@@ -118,29 +118,40 @@ class idigbio:
             sys.exit(1)
 
         # open a mongo connection
-        mongoConn = mongoConnect.mongoConnect()
+        multiConn = multiConnect.multiConnect()
 
-    	# Iterate through everything we get back
+        mostRecentDumpDate = datetime.strptime("01/01/1900", "%m/%d/%Y")
+        mostRecentKey = mostRecentModified = mostRecentSize = ''
+    	# Iterate through everything we get back for the most recent full dump
     	for collection in endpointXML.find_all('contents'):
             collectionKey = collection.key.string
             collectionModified = collection.lastmodified.string
             collectionSize = collection.size.string
             # Skip these collections
-            if '.eml' in collectionKey or 'idigbio' in collectionKey or '.png' in collectionKey:
-                self.logger.info("This idigbio collection cannot be imported: " + collectionKey)
+            if 'idigbio' not in collectionKey:
+                self.logger.info("Skipping this partial collection: " + collectionKey)
                 continue
 
-            # Check if this collection a) exists and b) was modified since last import
-            # If not exists import it straight, if it does replace matching docs in mongo
-            # Returns 3 possible flags: new | modified | static
-            # TODO only update specific fields? Or just overwrite in mongo?
+            # Store collection key of the most recent full dump
             self.logger.info("Checking status of collection " + collectionKey)
-            collectionStatus = mongoConn.checkIDBCollectionStatus(collectionKey, collectionModified)
+            dateGroup = re.search(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', collectionKey)
+            dumpDate = datetime.strptime(dateGroup.group(), "%Y-%m-%d")
+            if dumpDate > mostRecentDumpDate:
+                mostRecentDumpDate = dumpDate
+                mostRecentKey = collectionKey
+                mostRecentModified = collection.lastmodified.string
+                mostRecentSize = collection.size.string
+
+            collectionKey = mostRecentKey
+            collectionModified = mostRecentModified
+            collectionSize = mostRecentSize
+
+            collectionStatus = multiConn.checkIDBCollectionStatus(collectionKey, collectionModified)
             if collectionStatus == 'static':
-                self.logger.debug("Skipping collection " + collectionKey + " no changes since last ingest")
+                self.logger.debug("Skipping collection " + collectionKey + " no new dumps since last run")
                 continue
 
-    		# Download & unzip the zip file!
+            # Download & unzip the zip file!
             collectionDir = self.downloadCollection(self.collectionRoot, collectionKey)
             if not collectionDir:
                 continue
@@ -154,7 +165,7 @@ class idigbio:
 
             # Get the count of records being imported and store it in the ingest log
             recordCount = ingestHelpers.csvCountRows(occurrenceFile)
-            recordCountResult = mongoConn.addToIngestCount(self.ingestLog, self.source, recordCount)
+            recordCountResult = multiConn.addToIngestCount(self.ingestLog, self.source, recordCount)
             if recordCountResult is False:
                 self.logger.error("Could not log record count. Check validity carefully!")
 
@@ -162,25 +173,20 @@ class idigbio:
 
             # If the collection has validated, then either import the full collection or
             # import the updated specimens
-            if collectionStatus == 'new':
-                self.logger.info("Doing full import of " + collectionKey)
-                fullImportResult = mongoConn.iDBFullImport(occurrenceFile, collectionKey, collectionModified)
-                if fullImportResult is False:
-                    self.logger.error("Import of " + collectionKey + " Failed")
-                self.logger.info("Imported " + collectionKey)
-            elif collectionStatus == 'modified':
-                self.logger.info("Doing partial import of " + collectionKey)
-                partialImportResult = mongoConn.iDBPartialImport(occurrenceFile, collectionKey, collectionModified, 'csv')
-                if partialImportResult is False:
-                    self.logger.error("There were at least some errors during import of " + collectionKey)
-                    print "Imported with at least some errors"
-                else:
-                    self.logger.info("Updated records in " + collectionKey)
+            self.logger.info("Doing full import of " + collectionKey)
+            fullImportResult = multiConn.iDBFullImport(occurrenceFile, collectionKey, collectionModified)
+            if fullImportResult is False:
+                self.logger.error("Import of " + collectionKey + " Failed")
+            self.logger.info("Imported " + collectionKey)
 
-    		# Once we're done delete the ZIP and directory and move on to the next!
             self.logger.debug("Deleting " + collectionKey + " & " + collectionDir)
             os.remove(collectionKey)
             shutil.rmtree(collectionDir)
+
+            # Run partial import for updates since most recent dump
+            today = datetime.today()
+            dayCount = (today - mostRecentDumpDate).days
+            partialResult = self.runPartialIngest(dayCount, mostRecentDumpDate)
 
         return True
 
@@ -219,7 +225,7 @@ class idigbio:
     def generateIDBRecordRequest(self, requestURL):
         try:
             recordRequest = requests.get(requestURL, timeout=10)
-        except (ConnectionError, ReadTimeout) as e:
+        except (requests.ConnectionError, ReadTimeout) as e:
             self.logger.error("Could not access iDigBio API")
             return False
 
@@ -308,9 +314,9 @@ class idigbio:
         self.logger.info("Checking for deleted records")
 
         # open a mongo connection
-        mongoConn = mongoConnect.mongoConnect()
-        idbRecordSets = mongoConn.idbGetRecordSets()
-        mongoConn.closeConnection()
+        multiConn = multiConnect.multiConnect()
+        idbRecordSets = multiConn.getCollectionCounts('idigbio', 'idigbio:recordset')
+        multiConn.closeConnection()
         if not idbRecordSets:
             self.logger.error("Could not load record sets. Check logs for error")
             return False
@@ -356,8 +362,8 @@ class idigbio:
                 specimenUUIDs.add(specimen['idigbio:uuid'])
 
         # open a mongo connection
-        mongoConn = mongoConnect.mongoConnect()
-        idbRecordSets = mongoConn.idbCheckAndDeleteRecords(setID, specimenUUIDs)
+        multiConn = multiConnect.multiConnect()
+        idbRecordSets = multiConn.checkAndDeleteRecords(setID, specimenUUIDs, 'idigbio:recordset', 'idigbio')
 
 
-        mongoConn.closeConnection()
+        multiConn.closeConnection()

@@ -71,19 +71,10 @@ def main():
     # Create test instance
     tests = testHelpers.epanddaTests(idb, pbdb)
 
-    # Check indexes and create if necessary
-    indexStatus = tests.checkIndexes(fullRefresh, 'pre')
-    if indexStatus is False:
-        logger.error("Index Creation Failure")
-        logHelpers.emailLogAndStatus('TEST ERROR', coreLogFile, testLogFile)
-        sys.exit(3)
 
-    # Check for sentinels and add if necessary
-    sentinelStatus = tests.createSentinels(ingestSources)
-    if sentinelStatus is False:
-        logger.error("Sentinal Creation Failure")
-        logHelpers.emailLogAndStatus('TEST ERROR', coreLogFile, testLogFile)
-        sys.exit(4)
+    # For the elastic version we will need different settings
+    # 1) Check to see if the full elastic collection should be dropped
+    # 2) Create sentinels on elastic, possibly in mongo (lol)
 
     #
     # MAIN BODY RUN THE INGESTS
@@ -99,27 +90,9 @@ def main():
         else:
             logger.info("Import of " + ingestSource + " successful!")
 
-    # If this was a full import, create indexes on collections
-    indexCreationResult = tests.checkIndexes(fullRefresh, 'post')
-
-    # Check for duplicates and remove any that exist
-    tests.checkAndRemoveDuplicates(ingestSources)
-
-    # If delete flag is set, scan collections for deleted records and
-    # remove any that are not in the source APIs
-    if removeDeleted:
-        for ingestSource in ingestSources:
-            ingester = sourceNames[ingestSource]
-            logger.info("Checking and removing deleted records")
-            deleteOutcome = ingester.deleteCheck()
 
     # Log the current number of records in ePandda
     addFullCounts = logHelpers.addFullCounts(ingestID, ingestSources)
-
-    # Test for existence/well form-edness of sentinel records
-    sentinelErrorStatus = tests.checkSentinels(ingestSources)
-    if sentinelErrorStatus is True:
-        logger.error("Sentinels Failed to Verify, check logs")
 
     # Check full counts against APIs of source providers
     tests.checkCounts(ingestSources, addFullCounts)

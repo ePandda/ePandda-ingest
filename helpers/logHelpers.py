@@ -15,7 +15,7 @@ from email.mime.text import MIMEText
 from email import Encoders
 
 # local modules
-import mongoConnect
+import multiConnect
 
 def createLog(module, level, fileSuffix):
     logger = logging.getLogger(module)
@@ -45,17 +45,17 @@ def createLog(module, level, fileSuffix):
 
 def createMongoLog(sources):
     # open a mongo connection
-    mongoConn = mongoConnect.mongoConnect()
-    ingestLogID = mongoConn.createIngestLog(sources)
-    mongoConn.closeConnection()
+    multiConn = multiConnect.multiConnect()
+    ingestLogID = multiConn.createIngestLog(sources)
+    multiConn.closeConnection()
     return ingestLogID
 
 def addFullCounts(ingestID, sources):
     # open a mongo connection
-    mongoConn = mongoConnect.mongoConnect()
+    multiConn = multiConnect.multiConnect()
     countsResult = {}
     for source in sources:
-        countStatus = mongoConn.addLogCount(ingestID, source)
+        countStatus = multiConn.addLogCount(ingestID, source)
         if countStatus is False:
             countsResult[source] = None
             continue
@@ -71,9 +71,9 @@ def logRunTime(ingestID, startTime, endTime):
     hours, minutes = divmod(minutes, 60)
     timeString = "%d:%02d:%02d" % (hours, minutes, seconds)
     # open a mongo connection
-    mongoConn = mongoConnect.mongoConnect()
-    ingestLogComplete = mongoConn.addRunTime(ingestID, timeString)
-    mongoConn.closeConnection()
+    multiConn = multiConnect.multiConnect()
+    ingestLogComplete = multiConn.addRunTime(ingestID, timeString)
+    multiConn.closeConnection()
     return ingestLogComplete
 
 def emailLogAndStatus(status, logFile, testLogFile):
