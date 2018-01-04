@@ -85,11 +85,11 @@ class paleobio:
         self.logger.info("Created merged dataset")
 
         # Merge new data into main pbdb collection
-        ingestResult = multiConn.pbdbMergeNewData('tmp_occurrence.json')
+        ingestResult = multiConn.pbdbMergeNewData('tmp_occurrence.csv')
         if ingestResult is False:
             self.logger.error("There was an error ingesting new records. Halting and please review the log")
             return False
-        os.remove('tmp_occurrence.json')
+        os.remove('tmp_occurrence.csv')
 
         # Create sentinels on the ingested data
         sentinelStatus = self.tests.createSentinels(['pbdb'])

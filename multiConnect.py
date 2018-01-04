@@ -65,9 +65,10 @@ class multiConnect:
 
     def iDBFullImport(self, occurrenceFile, collectionKey, collectionModified):
         self.logger.debug("Formating GeoPoints for " + occurrenceFile)
-        ingestHelpers.idbCleanGeoPoints(occurrenceFile)
+        ingestHelpers.idbCleanSpreadsheet(occurrenceFile)
         self.logger.debug("Importing collection " + occurrenceFile + "into Elastic")
-        importCall = Popen(['elasticsearch_loader', '--es-host', self.elastic, '--index', 'endpoint', '--type', self.idigbio, '--id-field', 'idigbio:uuid', 'csv', occurrenceFile], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        tmpIN = open(occurrenceFile)
+        importCall = Popen(['/usr/share/logstash/bin/logstash', '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
             self.logger.error("elastic import failed with error: " + err)
@@ -85,9 +86,10 @@ class multiConnect:
 
     def iDBPartialImport(self, occurrenceFile, collectionKey, collectionModified, fileType):
         self.logger.debug("Formating GeoPoints for " + occurrenceFile)
-        ingestHelpers.idbCleanGeoPoints(occurrenceFile)
-        self.logger.debug("Importing collection " + occurrenceFile + "into Elastic")
-        importCall = Popen(['elasticsearch_loader', '--es-host', self.elastic, '--index', 'endpoint', '--type', self.idigbio, '--id-field', 'idigbio:uuid', 'csv', occurrenceFile], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        ingestHelpers.idbCleanSpreadsheet(occurrenceFile)
+        self.logger.debug("Importing collection " + occurrenceFile + " into Elastic")
+        tmpIN = open(occurrenceFile)
+        importCall = Popen(['/usr/share/logstash/bin/logstash', '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
             self.logger.error("elastic import failed with error: " + err)
@@ -158,7 +160,7 @@ class multiConnect:
                 self.logger.error("Could not find reference_no: " + str(referenceNo))
                 continue
             referenceData.pop("_id", None) # Remove ObjectID field
-            self.logger.debug("Adding collection data for collection_no: " + str(referenceNo))
+            self.logger.debug("Adding reference data for reference: " + str(referenceNo))
             occurrenceCollection.update_many({'reference_no': referenceNo}, {'$addToSet': {'occ_refs': referenceData}})
 
         return True
@@ -167,7 +169,7 @@ class multiConnect:
         self.logger.info("Merging new PaleoBio data")
 
         self.logger.debug("Exporting contents of temporary collection")
-        exportCall = Popen(['mongoexport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', 'tmp_occurrence', '--type', 'json', '--jsonArray', '-o', 'tmp_occurrence.json'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        exportCall = Popen(['mongoexport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', 'tmp_occurrence', '--type', 'csv', '-o', 'tmp_occurrence.csv', '--fieldFile', 'sources/pbdbFields.txt'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
         out, err = exportCall.communicate()
         if exportCall.returncode != 0:
             self.logger.error("mongoexport failed with error: " + err)
@@ -177,14 +179,15 @@ class multiConnect:
 
         self.logger.debug("Formating GeoPoints for " + tmp_occurrence)
         ingestHelpers.pbdbCleanGeoPoints(tmp_occurrence)
-        self.logger.debug("Importing collection " + tmp_occurrence + "into Elastic")
-        importCall = Popen(['elasticsearch_loader', '--es-host', self.elastic, '--index', 'endpoint', '--type', self.pbdb, '--id-field', 'occurrence_no', 'json', tmp_occurrence], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        self.logger.debug("Importing collection " + tmp_occurrence + " into Elastic")
+        tmpIN = open(tmp_occurrence)
+        importCall = Popen(['/usr/share/logstash/bin/logstash', '-f', 'pbdb_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
-            self.logger.error("mongoimport failed with error: " + err)
+            self.logger.error("elasticsearch_loader failed with error: " + err)
             return False
         else:
-            self.logger.info("mongoimport success! " + out)
+            self.logger.info("elasticsearch_loader success! " + out)
             return True
         return True
 
@@ -301,6 +304,8 @@ class multiConnect:
 
     def addSentinels(self, source, totalCount, existingSentinels):
         # Calculating no. of sentinels to add
+        sourceDB = self.client[self.config[source+'_db']]
+        sentinelCollection = sourceDB['sentinels']
         sentinelMax = int(math.ceil(totalCount * self.config['sentinel_ratio']))
         newSentinels = sentinelMax - existingSentinels
         sentinelInterval = totalCount / sentinelMax

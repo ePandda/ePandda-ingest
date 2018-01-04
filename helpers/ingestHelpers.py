@@ -1,12 +1,15 @@
 #
 # Helpers for ePandda ingest process
 #
+import sys
 import os
+import re
 import shutil
 from importlib import import_module
 import argparse
 import logging
 import json
+import ijson
 import hashlib
 import pandas as pd
 from tempfile import NamedTemporaryFile
@@ -54,8 +57,9 @@ def compareDocuments(source, sentinel):
 
     return False
 
-def idbCleanGeoPoints(occurrenceFile):
-    tempCSV = NamedTemporaryFile(delete=False)
+def idbCleanSpreadsheet(occurrenceFile):
+    tempCSV = open("tmp_idigbio.csv", "wb")
+    csv.field_size_limit(sys.maxsize)
     with open(occurrenceFile, 'rb') as csvFile, tempCSV:
         reader = csv.reader(csvFile)
         writer = csv.writer(tempCSV)
@@ -63,25 +67,82 @@ def idbCleanGeoPoints(occurrenceFile):
         for row in reader:
             if header:
                 geoCell = row.index('idigbio:geoPoint')
+                idigbioDate = row.index('idigbio:eventDate')
+                modifiedDate = row.index('idigbio:dateModified')
+                dwcDate = row.index('dwc:eventDate')
+                row.append("dwc:eventDateEarly")
+                row.append("dwc:eventDateLate")
+                row[dwcDate] = 'dwc:oldEventDate'
                 header = False
+                writer.writerow(row)
                 continue
             if row[geoCell]:
-                row[geoCell] = json.loads(row[geoCell])
+                tmpGeo = json.loads(row[geoCell])
+                geoStr = str(tmpGeo['lat']) + ',' + str(tmpGeo['lon'])
+                row[geoCell] = geoStr
+            if row[idigbioDate]:
+                onlyDateMatch = re.match("([0-9\-]+)T.*", row[idigbioDate])
+                if onlyDateMatch:
+                    onlyDate = onlyDateMatch.group(1)
+                    row[idigbioDate] = onlyDate
+            if row[modifiedDate]:
+                modDateMatch = re.match("([0-9\-]+)T.*", row[idigbioDate])
+                if modDateMatch:
+                    modDate = modDateMatch.group(1)
+                    row[modifiedDate] = modDate
+            if row[dwcDate]:
+                if re.search("-[0-9]{1}-", row[dwcDate]):
+                    re.sub("-([0-9]{1})-", "-0\1-", row[dwcDate])
+                    dwcArray = row[dwcDate].split('/')
+                    if len(dwcArray) > 1:
+                        dwcEarly = dwcArray[0]
+                        dwcLate = dwcArray[1]
+                        row.append(dwcEarly)
+                        row.append(dwcLate)
+                    else:
+                        row.append(row[dwcDate])
+                        row.append(row[dwcDate])
+
             writer.writerow(row)
-    shutil.move(tempCSV.name, occurrenceFile)
+    shutil.move("tmp_idigbio.csv", occurrenceFile)
+    tempCSV.close()
 
 def pbdbCleanGeoPoints(occurrenceFile):
-    tempJSON = NamedTemporaryFile(delete=False)
-    with open(occurrenceFile, 'rb') as jsonFile:
-        reader = json.load(jsonFile)
+    tempCSV = open("tmp_pbdb.csv", "wb")
+    csv.field_size_limit(sys.maxsize)
+    with open(occurrenceFile, 'rb') as csvFile, tempCSV:
+        reader = csv.reader(csvFile)
+        writer = csv.writer(tempCSV)
+        header = True
         for row in reader:
-            row.pop("_id")
-            if row['lat'] and row['lng']:
-                row['geoPoint'] = [row['lat'], row['lng']]
-            if row['paleolat'] and row['paleolng']:
-                row['paleoGeoPoint'] = [row['paleolat'], row['paleolng']]
-        json.dump(reader, tempJSON)
-    shutil.move(tempJSON.name, occurrenceFile)
+            if header:
+            	rowLen = len(row)
+                latCell = row.index('lat')
+                lngCell = row.index('lng')
+                pLatCell = row.index('paleolat')
+                pLngCell = row.index('paleolng')
+                row.append('geoPoint')
+                row.append('paleoGeoPoint')
+                for cell in row:
+
+                	if '.0.' in cell:
+                		newCell = cell.replace('.0.', '-')
+                		cellIndex = row.index(cell)
+                		row[cellIndex] = newCell
+                print(row)
+                header = False
+            else:
+            	if row[latCell] and row[lngCell]:
+            	    row.append(str(row[latCell]) + ',' + str(row[lngCell]))
+            	else:
+            		row.append('')
+            	if row[pLatCell] and row[pLngCell]:
+                	row.append(str(row[pLatCell]) + ',' + str(row[pLngCell]))
+                else:
+            		row.append('')
+            writer.writerow(row)
+    shutil.move("tmp_pbdb.csv", occurrenceFile)
+    tempCSV.close()
 
 def csvDuplicateHeaderCheck(csvFile):
     occurrenceHeader = pd.read_csv(csvFile, sep=",", nrows=1)

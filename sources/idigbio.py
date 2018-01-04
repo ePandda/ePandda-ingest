@@ -13,8 +13,10 @@ from unidecode import unidecode
 import urllib2
 import requests
 import zipfile
+import zlib
 
 # System tools
+import sys
 import traceback
 import os
 import shutil
@@ -74,7 +76,7 @@ class idigbio:
 
         # open a mongo connection
         multiConn = multiConnect.multiConnect()
-        collectionName = 'iDigBio_ingest_' + refreshFrom
+        collectionName = 'iDigBio_ingest_' + str(refreshFrom)
         # Check if the collection has already been updated for this date
         refreshStatus = multiConn.checkIDBCollectionStatus(collectionName, refreshFrom)
         if refreshStatus == 'static':
@@ -135,28 +137,29 @@ class idigbio:
             # Store collection key of the most recent full dump
             self.logger.info("Checking status of collection " + collectionKey)
             dateGroup = re.search(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', collectionKey)
-            dumpDate = datetime.strptime(dateGroup.group(), "%Y-%m-%d")
-            if dumpDate > mostRecentDumpDate:
-                mostRecentDumpDate = dumpDate
-                mostRecentKey = collectionKey
-                mostRecentModified = collection.lastmodified.string
-                mostRecentSize = collection.size.string
+            if dateGroup:
+            	dumpDate = datetime.strptime(dateGroup.group(), "%Y-%m-%d")
+            	if dumpDate > mostRecentDumpDate:
+                	mostRecentDumpDate = dumpDate
+                	mostRecentKey = collectionKey
+                	mostRecentModified = collection.lastmodified.string
+                	mostRecentSize = collection.size.string
 
-            collectionKey = mostRecentKey
-            collectionModified = mostRecentModified
-            collectionSize = mostRecentSize
+        collectionKey = mostRecentKey
+        collectionModified = mostRecentModified
+        collectionSize = mostRecentSize
 
         # Download & unzip the zip file!
         collectionDir = self.downloadCollection(self.collectionRoot, collectionKey)
         if not collectionDir:
-            continue
+            return False
 
         # Check that we got a decent CSV/TXT file in that unzipped directory
         # This spot checks 'core' fields from each of the main indexes we create
         # If there they're it means that its a well formed record
         occurrenceFile = self.checkCollection(collectionDir)
         if not occurrenceFile:
-            continue
+            return False
 
         # Get the count of records being imported and store it in the ingest log
         recordCount = ingestHelpers.csvCountRows(occurrenceFile)
@@ -256,17 +259,26 @@ class idigbio:
 
     def downloadCollection(self, collectionRoot, collectionKey):
         self.logger.debug("Downloading collection " + collectionKey)
-        sourceColl = urllib2.urlopen(collectionRoot + collectionKey).read()
-        try:
-            with open(collectionKey, 'wb') as zip_file:
-                zip_file.write(sourceColl)
-            # Unzip the zip file!
-            collectionDir = collectionKey[:-4]
-            with zipfile.ZipFile(collectionKey, 'r') as unzip:
-                unzip.extractall(collectionDir)
-        except zipfile.BadZipfile:
-            self.logger.error("This file cannot be unzipped! Manually check for validity: " + collectionKey)
-            return None
+        if os.path.isfile(collectionKey):
+        	self.logger.info(collectionKey + " is already downloaded! Skipping step")
+        	zf = open(collectionKey, 'rb')
+        else:
+		sourceColl = requests.get(collectionRoot + collectionKey, stream=True)
+		zWrite = open(collectionKey, 'wb')
+		for chunk in sourceColl.iter_content(chunk_size=1024):
+			if chunk:
+				zWrite.write(chunk)
+		zWrite.close()
+		zf = open(collectionKey, 'rb')
+	self.logger.debug("Download Complete. Unziping source file " + collectionKey)	
+	# Unzip the zip file!
+	collectionDir = collectionKey[:-4]
+	zFile = zipfile.ZipFile(zf)
+	zFile.extractall(collectionDir)	
+	
+	zFile.close()
+	zf.close()
+
         return collectionDir
 
     def checkCollection(self, collectionDir):
