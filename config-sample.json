@@ -7,6 +7,7 @@
   "mongodb_host": "mongohost:port",
   "mongodb_user": "[mongo_user]",
   "mongodb_password": "[mongo_pw]",
+  "logstash_path": "[path_to_logstash_executable]",
   "version": 1.0,
   "idigbio_db": "[idigbio_db]",
   "pbdb_db": "[pbdb_db]",

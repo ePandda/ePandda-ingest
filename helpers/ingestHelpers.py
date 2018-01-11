@@ -9,7 +9,6 @@ from importlib import import_module
 import argparse
 import logging
 import json
-import ijson
 import hashlib
 import pandas as pd
 from tempfile import NamedTemporaryFile
@@ -43,8 +42,9 @@ def getMd5Hash(dict):
 
 def compareDocuments(source, sentinel):
     for doc in [source, sentinel]:
-        if '_id' in doc:
-            doc.pop('_id', None)
+        for field in ['_id', '@version', '@timestamp', 'type', 'host']:
+            if '_id' in doc:
+                doc.pop('_id', None)
         for ref in ['coll_refs', 'occ_refs']:
             if ref in doc:
                 for i in range(len(doc[ref])):

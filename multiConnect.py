@@ -20,6 +20,7 @@ from subprocess import Popen, PIPE, call
 import shutil
 import logging
 import datetime
+import time
 import math
 
 # helper module
@@ -38,7 +39,8 @@ class multiConnect:
         self.indexMapping = self.config['elastic_mapping']
         self.ingestLog = self.client[self.config['log_db']]
         self.endpoints = self.client[self.config['endpoints_db']]
-        self.logger = logging.getLogger("ingest.mongoConnection")
+        self.logger = logging.getLogger("ingest.multiConnection")
+        self.logstash = self.config['logstash_path']
 
     def closeConnection(self):
         try:
@@ -68,7 +70,7 @@ class multiConnect:
         ingestHelpers.idbCleanSpreadsheet(occurrenceFile)
         self.logger.debug("Importing collection " + occurrenceFile + "into Elastic")
         tmpIN = open(occurrenceFile)
-        importCall = Popen(['/usr/share/logstash/bin/logstash', '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+        importCall = Popen([self.logstash, '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
             self.logger.error("elastic import failed with error: " + err)
@@ -89,7 +91,7 @@ class multiConnect:
         ingestHelpers.idbCleanSpreadsheet(occurrenceFile)
         self.logger.debug("Importing collection " + occurrenceFile + " into Elastic")
         tmpIN = open(occurrenceFile)
-        importCall = Popen(['/usr/share/logstash/bin/logstash', '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+        importCall = Popen([self.logstash, '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
             self.logger.error("elastic import failed with error: " + err)
@@ -181,7 +183,7 @@ class multiConnect:
         ingestHelpers.pbdbCleanGeoPoints(tmp_occurrence)
         self.logger.debug("Importing collection " + tmp_occurrence + " into Elastic")
         tmpIN = open(tmp_occurrence)
-        importCall = Popen(['/usr/share/logstash/bin/logstash', '-f', 'pbdb_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+        importCall = Popen([self.logstash, '-f', 'pbdb_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
             self.logger.error("elasticsearch_loader failed with error: " + err)
@@ -310,24 +312,28 @@ class multiConnect:
         newSentinels = sentinelMax - existingSentinels
         sentinelInterval = totalCount / sentinelMax
         self.logger.debug("setting sentinel interval to " + str(sentinelInterval) + " for max " + str(newSentinels) + " sentinals")
-        try:
-            lastSentinel = sentinelCollection.find_one({}).sort([('_id', -1)])
-            lastSentinelID = lastSentinel['_id']
-        except AttributeError:
-            lastSentinelID = ObjectId('000000000000000000000000')
+
         sentinelCount = 0
+        createdSentinels = []
         bulk = sentinelCollection.initialize_unordered_bulk_op()
-        while sentinelCount < newSentinels:
-            sentinelQuery = {
-                "size": 1,
-                "from": sentinelInterval
+        randomSentinelQuery = {
+            "size": 50,
+            "query": {
+                "function_score": {
+                    "query": {"match_all": {}},
+                    "random_score": {}
+                }
             }
-            addSentinel = self.esClient.search(index='endpoint', doc_type=source, body=sentinelQuery)
-            for newSentinal in addSentinel['hits']['hits']:
-                bulk.find({'_id': newSentinel['_source']['_id']}).upsert().update({'$set': newSentinel['_source']})
-                lastSentinelID = newSentinel['_source']['_id']
+        }
+        while True:
+            addSentinels = self.esClient.search(body=randomSentinelQuery, index="endpoint", doc_type=source)
+            for newSentinel in addSentinels['hits']['hits']:
+                if newSentinel['_id'] in createdSentinels:
+                    self.logger.debug("Sentinel already added, skipping")
+                    continue
+                bulk.find({'_id': newSentinel['_id']}).upsert().update({'$set': newSentinel['_source']})
+                createdSentinels.append(newSentinel['_id'])
                 sentinelCount += 1
-                sentinelInterval += sentinelInterval
                 if sentinelCount % 250 == 0:
                     try:
                         bulk_results = bulk.execute()
@@ -339,6 +345,8 @@ class multiConnect:
                     except InvalidOperation as io:
                         self.logger.info("There were no records to update in Sentinels")
                     bulk = sentinelCollection.initialize_unordered_bulk_op()
+            if sentinelCount > newSentinels:
+                break
 
         if sentinelCount % 250 != 0:
             try:
@@ -350,7 +358,6 @@ class multiConnect:
                 importError = True
             except InvalidOperation as io:
                 self.logger.info("There were no records to update in Sentinels")
-
 
         self.logger.info(str(sentinelCount) + " new sentinel records created")
         if sentinelCount + existingSentinels >= sentinelMax:

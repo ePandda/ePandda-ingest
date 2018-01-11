@@ -20,48 +20,6 @@ class epanddaTests:
             "pbdb": pbdb
         }
 
-    def checkIndexes(self, fullRefresh, importStatus):
-        indexes = self.config['test_indexes']
-        multiConn = multiConnect.multiConnect()
-        for indexCheck in indexes:
-            database = indexCheck['db']
-            collection = indexCheck['collection']
-            verifyIndexes = indexCheck['indexes']
-            indexTestResult = multiConn.indexTest(database, collection, verifyIndexes)
-
-            if indexTestResult is True:
-                if indexCheck['dropForFull'] is False:
-                    self.logger.info(collection + " has all necessary indexes")
-                elif fullRefresh is True:
-                    self.logger.info("Dropping indexes on " + collection + " for full import ")
-                    indexDropResult = multiConn.deleteIndexes(database, collection, verifyIndexes)
-                    return indexDropResult
-                else:
-                    self.logger.info("Retaining necessary indexes for partial import")
-            elif indexCheck['dropForFull'] is False:
-                self.logger.warning(collection + " is missing the following indexes. They will now be created")
-                self.logger.warning(indexTestResult)
-                indexResult = multiConn.createIndexes(database, collection, indexTestResult)
-                if indexResult is False:
-                    self.logger.warning(collection + " failed index test. Exit")
-                    return False
-            else:
-                if importStatus is 'post':
-                    self.logger.info(collection + " has not been indexed. Indexing now following full import")
-                    indexResult = multiConn.createIndexes(database, collection, indexTestResult)
-                    if indexResult is False:
-                        self.logger.warning(collection + " failed index test. Exit")
-                        return False
-                elif fullRefresh is False:
-                    self.logger.info("Need indexes for partial import. Indexing now.")
-                    indexResult = multiConn.createIndexes(database, collection, indexTestResult)
-                    if indexResult is False:
-                        self.logger.warning(collection + " failed index test. Exit")
-                        return False
-                else:
-                    self.logger.info(collection + " is not indexed, which is necessary for the full import, proceeding")
-        return True
-
     def checkCounts(self, sources, fullCounts):
         for source in sources:
             sourceInstance = self.sources[source]
