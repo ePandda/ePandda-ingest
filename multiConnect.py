@@ -317,7 +317,7 @@ class multiConnect:
         createdSentinels = []
         bulk = sentinelCollection.initialize_unordered_bulk_op()
         randomSentinelQuery = {
-            "size": 50,
+            "size": 25,
             "query": {
                 "function_score": {
                     "query": {"match_all": {}},
@@ -325,8 +325,9 @@ class multiConnect:
                 }
             }
         }
-        while True:
-            addSentinels = self.esClient.search(body=randomSentinelQuery, index="endpoint", doc_type=source)
+        sentinelLoop = True
+        while sentinelLoop:
+            addSentinels = self.esClient.search(body=randomSentinelQuery, index=source, doc_type=source)
             for newSentinel in addSentinels['hits']['hits']:
                 if newSentinel['_id'] in createdSentinels:
                     self.logger.debug("Sentinel already added, skipping")
@@ -345,8 +346,9 @@ class multiConnect:
                     except InvalidOperation as io:
                         self.logger.info("There were no records to update in Sentinels")
                     bulk = sentinelCollection.initialize_unordered_bulk_op()
-            if sentinelCount > newSentinels:
-                break
+                if sentinelCount > newSentinels:
+                    sentinelLoop = False
+                    break
 
         if sentinelCount % 250 != 0:
             try:
@@ -384,7 +386,7 @@ class multiConnect:
                     "_id": sentinel['_id']
                 }
             }
-            sourceRecords = self.esClient.search(index='endpoint', body=sentinelQuery)
+            sourceRecords = self.esClient.search(index=source, body=sentinelQuery)
             sourceRecord = sourceRecords['hits']['hits'][0]['_source']
             if not sourceRecord:
                 missingSentinels += 1
@@ -423,7 +425,7 @@ class multiConnect:
                 }
             }
         }
-        duplicates = self.esClient.search(index='endpoint', doc_type='source', body=duplicateQuery)
+        duplicates = self.esClient.search(index=source, doc_type=source, body=duplicateQuery)
         if duplicates['hits']['total'] == 0:
             self.logger.info("No duplicates found")
             return None
@@ -437,7 +439,7 @@ class multiConnect:
             self.logger.debug("Best record is " + str(bestRecord['_id']))
             for record in duplicateArray:
                 self.logger.debug('Deleting ' + str(record[sourceIDField]))
-                deleteResult = self.esClient.delete(index='endpoint', doc_type=source, id=record[sourceIDField])
+                deleteResult = self.esClient.delete(index=source, doc_type=source, id=record[sourceIDField])
                 if deleteResult['result'] != 'deleted':
                     self.logger.error("FAILED TO DELETE " + record[sourceIDField])
                 self.logger.info("Deleted duplicate " + record[sourceIDField])
