@@ -8,6 +8,7 @@ from pymongo import MongoClient
 import pymongo
 from pymongo.errors import BulkWriteError, InvalidOperation
 from bson import ObjectId
+import pandas as pd
 # ElasticSearch too now
 from elasticsearch import Elasticsearch, helpers
 
@@ -22,6 +23,8 @@ import logging
 import datetime
 import time
 import math
+import os
+import fnmatch
 
 # helper module
 from helpers import ingestHelpers
@@ -68,16 +71,19 @@ class multiConnect:
     def iDBFullImport(self, occurrenceFile, collectionKey, collectionModified):
         self.logger.debug("Formating GeoPoints for " + occurrenceFile)
         ingestHelpers.idbCleanSpreadsheet(occurrenceFile)
-        self.logger.debug("Importing collection " + occurrenceFile + "into Elastic")
-        tmpIN = open(occurrenceFile)
-        importCall = Popen([self.logstash, '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
-        out, err = importCall.communicate()
-        if importCall.returncode != 0:
-            self.logger.error("elastic import failed with error: " + err)
-            return False
-        else:
-            self.logger.info("elastic import success! " + out)
-        collCollection = self.idigbio.collectionStatus
+        for file in os.listdir('.'):
+            if fnmatch.fnmatch(file, 'occurrence_*.csv'):
+                self.logger.debug("Importing collection " + file + "into Elastic")
+                tmpIN = open(file)
+                importCall = Popen([self.logstash, '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+                out, err = importCall.communicate()
+                if importCall.returncode != 0:
+                    self.logger.error("elastic import failed with error: " + err)
+                    return False
+                else:
+                    self.logger.info("elastic import success! " + out)
+                    os.remove(file)
+        collCollection = self.idigbio_db.collectionStatus
         updateStatus = collCollection.update({'collection': collectionKey}, {'$set': {'collection': collectionKey, 'modifiedDate': collectionModified}}, upsert=True)
         if collCollection:
             self.logger.debug("Added/updated collection entry in collectionStatus for " + collectionKey)
@@ -210,7 +216,7 @@ class multiConnect:
                 }
             }
         }
-        recordSets = self.esClient.search(index='endpoint', body=setAggregation)
+        recordSets = self.esClient.search(index=docType, body=setAggregation)
         collectionCounts = []
         if not recordSets:
             return False
@@ -239,7 +245,7 @@ class multiConnect:
                     }
                 }
             }
-            setIDs = self.esClient.search(index='endpoint', query=setSearch)
+            setIDs = self.esClient.search(index=docType, query=setSearch)
             for specimen in setIDs['hits']['hits']:
                 epanddaIDs.add(specimen['_id'])
             if totalResults == 0:
@@ -282,7 +288,7 @@ class multiConnect:
 
     def getCollectionCount(self, source):
         fullResultQuery = {"size": 0, "query": {"match_all": {}}}
-        countResults = self.esClient.search(index='endpoint', doc_type=source, body=fullResultQuery)
+        countResults = self.esClient.search(index=source, doc_type=source, body=fullResultQuery)
         totalCount = countResults['hits']['total']
         return totalCount
 

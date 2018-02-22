@@ -46,7 +46,8 @@ def main():
 
     # Create log entry in ingest collection
     ingestID = logHelpers.createMongoLog(ingestSources)
-
+	
+	
     # Create the logs
     logger, coreLogFile = logHelpers.createLog('ingest', logLevel, '_ingest')
     testLogger, testLogFile = logHelpers.createLog('test', logLevel, '_tests')
@@ -70,11 +71,6 @@ def main():
 
     # Create test instance
     tests = testHelpers.epanddaTests(idb, pbdb)
-
-
-    # For the elastic version we will need different settings
-    # 1) Check to see if the full elastic collection should be dropped
-    # 2) Create sentinels on elastic, possibly in mongo (lol)
 
     #
     # MAIN BODY RUN THE INGESTS

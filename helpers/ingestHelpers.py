@@ -58,21 +58,23 @@ def compareDocuments(source, sentinel):
     return False
 
 def idbCleanSpreadsheet(occurrenceFile):
-    tempCSV = open("tmp_idigbio.csv", "wb")
+    tempCSV = open("occurrence_0.csv", "wb")
     csv.field_size_limit(sys.maxsize)
-    with open(occurrenceFile, 'rb') as csvFile, tempCSV:
+    with open(occurrenceFile, 'rb') as csvFile:
         reader = csv.reader(csvFile)
         writer = csv.writer(tempCSV)
+        fileCount = 0
+        rowCount = 0
         header = True
         for row in reader:
             if header:
                 geoCell = row.index('idigbio:geoPoint')
+                flagCell = row.index('idigbio:flags')
                 idigbioDate = row.index('idigbio:eventDate')
                 modifiedDate = row.index('idigbio:dateModified')
                 dwcDate = row.index('dwc:eventDate')
                 row.append("dwc:eventDateEarly")
                 row.append("dwc:eventDateLate")
-                row[dwcDate] = 'dwc:oldEventDate'
                 header = False
                 writer.writerow(row)
                 continue
@@ -91,20 +93,27 @@ def idbCleanSpreadsheet(occurrenceFile):
                     modDate = modDateMatch.group(1)
                     row[modifiedDate] = modDate
             if row[dwcDate]:
-                if re.search("-[0-9]{1}-", row[dwcDate]):
-                    re.sub("-([0-9]{1})-", "-0\1-", row[dwcDate])
-                    dwcArray = row[dwcDate].split('/')
-                    if len(dwcArray) > 1:
-                        dwcEarly = dwcArray[0]
-                        dwcLate = dwcArray[1]
-                        row.append(dwcEarly)
-                        row.append(dwcLate)
-                    else:
-                        row.append(row[dwcDate])
-                        row.append(row[dwcDate])
-
+                if re.search("-[0-9]{1}", row[dwcDate]):
+                    newDate = re.sub(r"-([0-9]{1})", r"-0\1", row[dwcDate])
+                dwcArray = row[dwcDate].split('/')
+                if len(dwcArray) > 1:
+                    dwcEarly = dwcArray[0]
+                    dwcLate = dwcArray[1]
+                    row.append(dwcEarly)
+                    row.append(dwcLate)
+                else:
+                    row.append(row[dwcDate])
+                    row.append(row[dwcDate])
+            if row[flagCell] is None:
+            	row[flagCell] = []
+            rowCount += 1
             writer.writerow(row)
-    shutil.move("tmp_idigbio.csv", occurrenceFile)
+            if rowCount % 5000000 == 0:
+                tempCSV.close()
+                fileCount += 1
+                tempCSV = open("occurrence_" + str(fileCount) + ".csv", "wb")
+                writer = csv.writer(tempCSV)
+            	
     tempCSV.close()
 
 def pbdbCleanGeoPoints(occurrenceFile):
