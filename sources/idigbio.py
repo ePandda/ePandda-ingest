@@ -12,6 +12,7 @@ import csv
 from unidecode import unidecode
 import urllib2
 import requests
+from requests.exceptions import ReadTimeout, ConnectionError
 import zipfile
 import zlib
 
@@ -42,7 +43,7 @@ class idigbio:
             self.refreshInterval = 1
         self.refreshDate = datetime.today() - timedelta(days=int(self.refreshInterval))
         self.refreshFrom = self.refreshDate.strftime('%Y-%m-%d')
-        self.refreshURL = 'https://api.idigbio.org/v2/download/?rq={"datemodified":{"type":"range","gte":"' + self.refreshFrom + '"}}'
+        #self.refreshURL = 'https://api.idigbio.org/v2/download/?rq={"datemodified":{"type":"range","gte":"' + self.refreshFrom + '"}}'
         self.refreshDownloadURL = "http://s.idigbio.org/idigbio-downloads/"
         self.recordCountURL = "https://search.idigbio.org/v2/summary/count/records/"
         self.deleteCheckRoot = "https://search.idigbio.org/v2/summary/stats/api?recordset="
@@ -84,24 +85,33 @@ class idigbio:
             return False
 
         # Query the iDigBio API for modified records
-        occurrenceFile, collectionKey = self.idbAPIDownload(self.refreshURL)
-        if not occurrenceFile:
-            return False
+        startDate = self.refreshDate
+        
+        endDate = startDate + timedelta(days=7)
+        while(startDate < datetime.today()):
+            dateChunkURL = 'https://api.idigbio.org/v2/download/?rq={"datemodified":{"type":"range","gte":"' + startDate.strftime('%Y-%m-%d') + '", "lte":"'+endDate.strftime('%Y-%m-%d')+'"}}'
+            occurrenceFile, collectionKey = self.idbAPIDownload(dateChunkURL)
+            if not occurrenceFile:
+                return False
 
-        # Get the count of records being imported and store it in the ingest log
-        recordCount = ingestHelpers.csvCountRows(occurrenceFile)
-        recordCountResult = multiConn.addToIngestCount(self.ingestLog, self.source, recordCount)
-        if recordCountResult is False:
-            self.logger.error("Could not log record count. Check validity carefully!")
+			# Get the count of records being imported and store it in the ingest log
+            recordCount = ingestHelpers.csvCountRows(occurrenceFile)
+            recordCountResult = multiConn.addToIngestCount(self.ingestLog, self.source, recordCount)
+            if recordCountResult is False:
+                self.logger.error("Could not log record count. Check validity carefully!")
 
-        # Download and ingest the created iDigBio file
-        ingestResult = multiConn.iDBPartialImport(occurrenceFile, collectionName, self.refreshFrom, 'csv')
-        if ingestResult is False:
-            self.logger.error("There were at least some errors during import of " + collectionKey)
-            print "Imported with at least some errors"
-        else:
-            self.logger.info("Updated records in " + collectionKey)
-
+			# Download and ingest the created iDigBio file
+            ingestResult = multiConn.iDBPartialImport(occurrenceFile, collectionName, self.refreshFrom, 'csv')
+            if ingestResult is False:
+                self.logger.error("There were at least some errors during import of " + collectionKey)
+                print "Imported with at least some errors"
+            else:
+                self.logger.info("Updated records in " + collectionKey)
+            startDate = endDate + timedelta(days=1)
+            endDate = endDate + timedelta(days=8)
+            if(endDate > datetime.today()):
+                endDate = datetime.today()
+			
         return True
 
     def runFullIngest(self):
@@ -223,7 +233,7 @@ class idigbio:
     def generateIDBRecordRequest(self, requestURL):
         try:
             recordRequest = requests.get(requestURL, timeout=10)
-        except (requests.ConnectionError, ReadTimeout) as e:
+        except (ConnectionError, ReadTimeout) as e:
             self.logger.error("Could not access iDigBio API")
             return False
 
@@ -240,14 +250,27 @@ class idigbio:
             try:
                 requestStatus = requests.get(statusURL, timeout=10)
             except (ConnectionError, ReadTimeout) as e:
-                self.logger.error("Could not access iDigBio API")
-                return False
+                self.logger.error("Could not access iDigBio API. Retrying")
+                i = 0
+                while(i < 3):
+                	try:
+                		requestStatus = requests.get(statusURL, timeout=10)
+                		break
+            		except (ConnectionError, ReadTimeout) as e:
+            			self.logger.error("Retry attempt " + str(i) + " Failed")
+            		i += 1
+            		time.sleep(15)
+            	if i == 2:
+            		self.logger.error("Could not access iDigBio API. All retry attempts failed")
+                	return False
 
             if requestStatus.status_code == 200:
                 downloadStatus = requestStatus.json()
                 if "task_status" in downloadStatus:
                     if downloadStatus['task_status'] == "SUCCESS":
                         return downloadStatus['download_url']
+                    elif downloadStatus['task_status'] == "FAILURE":
+                        return False
             else:
                 self.logger.error("iDigBio download link failed")
                 return False
