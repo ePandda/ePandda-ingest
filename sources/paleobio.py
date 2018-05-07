@@ -69,7 +69,7 @@ class paleobio:
 
         # Get the count of records being imported and store it in the ingest log
         recordCount = ingestHelpers.csvCountRows('occurrence.csv')
-        recordCountResult = multiConn.addToIngestCount(self.ingestLog, self.source, recordCount)
+        recordCountResult = multiConn.addToIngestCount(self.ingestLog, self.source, recordCount, 0)
         if recordCountResult is False:
             self.logger.error("Could not log record count. Check validity carefully!")
 

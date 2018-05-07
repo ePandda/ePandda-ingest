@@ -79,34 +79,42 @@ class idigbio:
         multiConn = multiConnect.multiConnect()
         collectionName = 'iDigBio_ingest_' + str(refreshFrom)
         # Check if the collection has already been updated for this date
-        refreshStatus = multiConn.checkIDBCollectionStatus(collectionName, refreshFrom)
-        if refreshStatus == 'static':
-            self.logger.info("An ingest has already been run from this date")
-            return False
+        #refreshStatus = multiConn.checkIDBCollectionStatus(collectionName, refreshFrom)
+        #if refreshStatus == 'static':
+        #    self.logger.info("An ingest has already been run from this date")
+        #    return False
 
         # Query the iDigBio API for modified records
         startDate = self.refreshDate
-        
-        endDate = startDate + timedelta(days=7)
+        endDate = datetime.today()
+        if startDate < (datetime.today() - timedelta(days=7)):
+        	endDate = startDate + timedelta(days=7)
         while(startDate < datetime.today()):
             dateChunkURL = 'https://api.idigbio.org/v2/download/?rq={"datemodified":{"type":"range","gte":"' + startDate.strftime('%Y-%m-%d') + '", "lte":"'+endDate.strftime('%Y-%m-%d')+'"}}'
-            occurrenceFile, collectionKey = self.idbAPIDownload(dateChunkURL)
+            occurrenceFile, mediaFile, collectionKey = self.idbAPIDownload(dateChunkURL)
             if not occurrenceFile:
                 return False
 
 			# Get the count of records being imported and store it in the ingest log
             recordCount = ingestHelpers.csvCountRows(occurrenceFile)
-            recordCountResult = multiConn.addToIngestCount(self.ingestLog, self.source, recordCount)
+            mediaCount = 0
+            if mediaFile:
+            	mediaCount = ingestHelpers.csvCountRows(mediaFile)
+            recordCountResult = multiConn.addToIngestCount(self.ingestLog, self.source, recordCount, mediaCount)
             if recordCountResult is False:
                 self.logger.error("Could not log record count. Check validity carefully!")
 
 			# Download and ingest the created iDigBio file
-            ingestResult = multiConn.iDBPartialImport(occurrenceFile, collectionName, self.refreshFrom, 'csv')
+            ingestResult = multiConn.iDBPartialImport(occurrenceFile, mediaFile, collectionName, self.refreshFrom, 'csv')
             if ingestResult is False:
                 self.logger.error("There were at least some errors during import of " + collectionKey)
                 print "Imported with at least some errors"
             else:
                 self.logger.info("Updated records in " + collectionKey)
+            
+            self.logger.debug("Deleting " + collectionKey)
+            os.remove(collectionKey)
+            shutil.rmtree(collectionKey[:-4])
             startDate = endDate + timedelta(days=1)
             endDate = endDate + timedelta(days=8)
             if(endDate > datetime.today()):
@@ -167,13 +175,16 @@ class idigbio:
         # Check that we got a decent CSV/TXT file in that unzipped directory
         # This spot checks 'core' fields from each of the main indexes we create
         # If there they're it means that its a well formed record
-        occurrenceFile = self.checkCollection(collectionDir)
+        occurrenceFile, mediaFile = self.checkCollection(collectionDir)
         if not occurrenceFile:
             return False
 
         # Get the count of records being imported and store it in the ingest log
         recordCount = ingestHelpers.csvCountRows(occurrenceFile)
-        recordCountResult = multiConn.addToIngestCount(self.ingestLog, self.source, recordCount)
+        mediaCount = 0
+        if mediaFile:
+        	mediaCount = ingestHelpers.csvCountRows(mediaFile)
+        recordCountResult = multiConn.addToIngestCount(self.ingestLog, self.source, recordCount, mediaCount)
         if recordCountResult is False:
             self.logger.error("Could not log record count. Check validity carefully!")
 
@@ -182,7 +193,7 @@ class idigbio:
         # If the collection has validated, then either import the full collection or
         # import the updated specimens
         self.logger.info("Doing full import of " + collectionKey)
-        fullImportResult = multiConn.iDBFullImport(occurrenceFile, collectionKey, collectionModified)
+        fullImportResult = multiConn.iDBFullImport(occurrenceFile, mediaFile, collectionKey, collectionModified)
         if fullImportResult is False:
             self.logger.error("Import of " + collectionKey + " Failed")
             self.logger.info("Imported " + collectionKey)
@@ -224,11 +235,11 @@ class idigbio:
         # Check that we got a decent CSV/TXT file in that unzipped directory
         # This spot checks 'core' fields from each of the main indexes we create
         # If there they're it means that its a well formed record
-        occurrenceFile = self.checkCollection(collectionDir)
+        occurrenceFile, mediaFile = self.checkCollection(collectionDir)
         if not occurrenceFile:
             return False
 
-        return occurrenceFile, collectionKey
+        return occurrenceFile, mediaFile, collectionKey
 
     def generateIDBRecordRequest(self, requestURL):
         try:
@@ -308,27 +319,44 @@ class idigbio:
         self.logger.debug("Checking collection directory" + collectionDir)
         dirContents = os.listdir(collectionDir)
         validFile = False
+        mediaFile = None
         for collFile in dirContents:
             if collFile in ['occurrence.txt', 'occurrence.csv']:
-                self.logger.info("Found valid " + collFile + " in " + collectionDir)
-                occurrenceFile = collectionDir + '/' + collFile
-                validFile = True
-                break
+            	if validFile == False:
+                	self.logger.info("Found valid " + collFile + " in " + collectionDir)
+                	occurrenceFile = collectionDir + '/' + collFile
+                	validFile = True
+            if collFile in ['multimedia.txt', 'multimedia.csv']:
+            	if mediaFile == None:
+            		self.logger.info("Found valid multimedia " + collFile + " in " + collectionDir)
+            		mediaFile = collectionDir + '/' + collFile
         if validFile is False:
             self.logger.error("No occurrence file found. Check this collection for valid content: " + collectionDir)
             return None
+        if mediaFile is None:
+        	self.logger.error("No multimedia file found. No immediate issue but verify that no media exists")
+        	
         occurrenceHeader = pd.read_csv(occurrenceFile, sep=",", nrows=1)
         occurrenceHeadList = list(occurrenceHeader.columns.values)
         headerChecklist = ['idigbio:uuid', 'idigbio:institutionName', 'dwc:genus', 'dwc:specificEpithet', 'dwc:country', 'dwc:stateProvince', 'dwc:earliestAgeOrLowestStage', 'dwc:latestAgeOrHighestStage', 'dwc:formation']
         for check in headerChecklist:
             if check not in occurrenceHeadList:
-                self.logger.error(occurrenceFile + "is not a valid CSV or TXT. Check source collection for validity")
+                self.logger.error(occurrenceFile + " is not a valid CSV or TXT. Check source collection for validity")
                 self.logger.debug("Header list for invalid file: " + str(occurrenceHeadList))
                 return None
         duplicateHeaders = ingestHelpers.csvDuplicateHeaderCheck(occurrenceFile)
         if duplicateHeaders:
             ingestHelpers.csvRenameDuplicateHeaders(occurrenceFile, duplicateHeaders)
-        return occurrenceFile
+        if mediaFile:
+        	mediaHeader = pd.read_csv(mediaFile, sep=",", nrows=1)
+        	mediaHeadList = list(mediaHeader.columns.values)
+        	mediaChecklist = ['idigbio:uuid', 'ac:accessURI', 'idigbio:etag']
+        	for mCheck in mediaChecklist:
+        		if mCheck not in mediaHeadList:
+        			self.logger.error(mediaFile + " is not a valid CSV or TXT multimedia file. Check Source for validity")
+        			mediaFile = None
+        
+        return occurrenceFile, mediaFile
 
     def getRecordCount(self):
         self.logger.debug("Checking full PBDB record Count")

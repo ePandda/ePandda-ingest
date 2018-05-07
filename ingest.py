@@ -81,7 +81,7 @@ def main():
         outcome = ingester.runIngest(dry=dryRun, test=testRun)
         if outcome is False:
             logger.error("Import of " + ingestSource + " failed! Review full log")
-            logHelpers.emailLogAndStatus('INGEST ERROR', logger.baseFilename, testLogger.baseFilename)
+            logHelpers.emailLogAndStatus('INGEST ERROR', coreLogFile, testLogFile)
             sys.exit(5)
         else:
             logger.info("Import of " + ingestSource + " successful!")

@@ -22,7 +22,7 @@ def createLog(module, level, fileSuffix):
     if level:
         checkLevel = level.lower()
     else:
-        checkLevel = 'warning'
+        checkLevel = 'info'
     levels = {'debug': logging.DEBUG, 'info': logging.INFO, 'warning': logging.WARNING, 'error': logging.ERROR, 'critical': logging.CRITICAL}
     today = time.strftime("%Y_%m_%d")
     loggerFile = './logs/' + today + fileSuffix + ".log"
@@ -33,8 +33,8 @@ def createLog(module, level, fileSuffix):
         fileLog.setLevel(levels[checkLevel])
         conLog.setLevel(levels[checkLevel])
     else:
-        fileLog.setLevel(levels['warning'])
-        conLog.setLevel(levels['warning'])
+        fileLog.setLevel(levels['info'])
+        conLog.setLevel(levels['info'])
     formatter = logging.Formatter('%(asctime)s_%(name)s_%(levelname)s: %(message)s')
     fileLog.setFormatter(formatter)
     conLog.setFormatter(formatter)

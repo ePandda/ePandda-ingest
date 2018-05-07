@@ -68,7 +68,7 @@ class multiConnect:
         else:
             return 'static'
 
-    def iDBFullImport(self, occurrenceFile, collectionKey, collectionModified):
+    def iDBFullImport(self, occurrenceFile, mediaFile, collectionKey, collectionModified):
         self.logger.debug("Formating GeoPoints for " + occurrenceFile)
         ingestHelpers.idbCleanSpreadsheet(occurrenceFile)
         for file in os.listdir('.'):
@@ -82,7 +82,16 @@ class multiConnect:
                     return False
                 else:
                     self.logger.info("elastic import success! " + out)
-                    os.remove(file)
+                os.remove(file)
+        if mediaFile:
+            tmpIN = open(mediaFile)
+            importCall = Popen([self.logstash, '-f', 'idigbio_media_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+            out, err = importCall.communicate()
+            if importCall.returncode != 0:
+                self.logger.error("elastic media import failed with error: " + err)
+                return False
+            else:
+                self.logger.info("elastic media import success! " + out)
         collCollection = self.idigbio_db.collectionStatus
         updateStatus = collCollection.update({'collection': collectionKey}, {'$set': {'collection': collectionKey, 'modifiedDate': collectionModified}}, upsert=True)
         if collCollection:
@@ -92,18 +101,32 @@ class multiConnect:
         return True
 
 
-    def iDBPartialImport(self, occurrenceFile, collectionKey, collectionModified, fileType):
+    def iDBPartialImport(self, occurrenceFile, mediaFile, collectionKey, collectionModified, fileType):
         self.logger.debug("Formating GeoPoints for " + occurrenceFile)
         ingestHelpers.idbCleanSpreadsheet(occurrenceFile)
         self.logger.debug("Importing collection " + occurrenceFile + " into Elastic")
-        tmpIN = open(occurrenceFile)
-        importCall = Popen([self.logstash, '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
-        out, err = importCall.communicate()
-        if importCall.returncode != 0:
-            self.logger.error("elastic import failed with error: " + err)
-            return False
-        else:
-            self.logger.info("elastic import success! " + out)
+        for file in os.listdir('.'):
+            if fnmatch.fnmatch(file, 'occurrence_*.csv'):
+                self.logger.debug("Importing collection " + file + "into Elastic")
+                tmpIN = open(occurrenceFile)
+                importCall = Popen([self.logstash, '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+                out, err = importCall.communicate()
+                if importCall.returncode != 0:
+                    self.logger.error("elastic import failed with error: " + err)
+                    return False
+                else:
+                    self.logger.info("elastic import success! " + out)
+                os.remove(file)
+        if mediaFile:
+            self.logger.debug("Importing media for collection " + occurrenceFile + " into Elastic")
+            tmpIN = open(mediaFile)
+            importCall = Popen([self.logstash, '-f', 'idigbio_media_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+            out, err = importCall.communicate()
+            if importCall.returncode != 0:
+                self.logger.error("elastic media import failed with error: " + err)
+                return False
+            else:
+                self.logger.info("elastic media import success! " + out)
         collCollection = self.idigbio_db.collectionStatus
         updateStatus = collCollection.update({'collection': collectionKey}, {'$set': {'collection': collectionKey, 'modifiedDate': collectionModified}}, upsert=True)
         if collCollection:
@@ -276,9 +299,9 @@ class multiConnect:
             self.logger.warning("Could not add time to mongo ingest log!")
             return False
 
-    def addToIngestCount(self, ingestID, source, recordCount):
+    def addToIngestCount(self, ingestID, source, recordCount, mediaCount):
         ingests = self.ingestLog[self.config['ingest_collection']]
-        ingestResult = ingests.update_one({'_id': ingestID}, {'$inc': {source+'_updated_records': recordCount}})
+        ingestResult = ingests.update_one({'_id': ingestID}, {'$inc': {source+'_updated_records': recordCount, source+'_update_media': mediaCount}})
         if ingestResult.modified_count == 1:
             self.logger.debug("Added import count to ingest log")
             return True
