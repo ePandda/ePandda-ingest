@@ -202,10 +202,10 @@ class idigbio:
             os.remove(collectionKey)
             shutil.rmtree(collectionDir)
 
-            # Run partial import for updates since most recent dump
-            today = datetime.today()
-            dayCount = (today - mostRecentDumpDate).days
-            partialResult = self.runPartialIngest(dayCount, mostRecentDumpDate)
+        # Run partial import for updates since most recent dump
+        today = datetime.today()
+        dayCount = (today - mostRecentDumpDate).days
+        partialResult = self.runPartialIngest(dayCount, mostRecentDumpDate)
 
         return True
 

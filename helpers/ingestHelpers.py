@@ -76,7 +76,7 @@ def idbCleanSpreadsheet(occurrenceFile):
                 row.append("dwc:eventDateEarly")
                 row.append("dwc:eventDateLate")
                 header = False
-                writer.writerow(row)
+                #writer.writerow(row)
                 continue
             if row[geoCell]:
                 tmpGeo = json.loads(row[geoCell])

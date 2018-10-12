@@ -75,7 +75,7 @@ class multiConnect:
             if fnmatch.fnmatch(file, 'occurrence_*.csv'):
                 self.logger.debug("Importing collection " + file + "into Elastic")
                 tmpIN = open(file)
-                importCall = Popen([self.logstash, '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+                importCall = Popen([self.logstash, '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash', '--pipeline.unsafe_shutdown'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
                 out, err = importCall.communicate()
                 if importCall.returncode != 0:
                     self.logger.error("elastic import failed with error: " + err)
@@ -109,7 +109,7 @@ class multiConnect:
             if fnmatch.fnmatch(file, 'occurrence_*.csv'):
                 self.logger.debug("Importing collection " + file + "into Elastic")
                 tmpIN = open(occurrenceFile)
-                importCall = Popen([self.logstash, '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+                importCall = Popen([self.logstash, '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash', '--pipeline.unsafe_shutdown'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
                 out, err = importCall.communicate()
                 if importCall.returncode != 0:
                     self.logger.error("elastic import failed with error: " + err)
@@ -120,7 +120,7 @@ class multiConnect:
         if mediaFile:
             self.logger.debug("Importing media for collection " + occurrenceFile + " into Elastic")
             tmpIN = open(mediaFile)
-            importCall = Popen([self.logstash, '-f', 'idigbio_media_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+            importCall = Popen([self.logstash, '-f', 'idigbio_media_logstash.conf', '--path.settings', '/etc/logstash', '--pipeline.unsafe_shutdown'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
             out, err = importCall.communicate()
             if importCall.returncode != 0:
                 self.logger.error("elastic media import failed with error: " + err)
@@ -212,7 +212,7 @@ class multiConnect:
         ingestHelpers.pbdbCleanGeoPoints(tmp_occurrence)
         self.logger.debug("Importing collection " + tmp_occurrence + " into Elastic")
         tmpIN = open(tmp_occurrence)
-        importCall = Popen([self.logstash, '-f', 'pbdb_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+        importCall = Popen([self.logstash, '-f', 'pbdb_logstash.conf', '--path.settings', '/etc/logstash', '--pipeline.unsafe_shutdown'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
             self.logger.error("elasticsearch_loader failed with error: " + err)

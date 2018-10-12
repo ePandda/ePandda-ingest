@@ -31,12 +31,15 @@ class paleobio:
         ingestInterval = self.config['pbdb_ingest_interval'] + 'd'
         if test:
             ingestInterval = '24h'
-        elif fullRefresh:
-            ingestInterval = '1900'
         self.occurrenceURL = 'https://paleobiodb.org/data1.2/occs/list.csv?all_records&show=full&occs_modified_after=' + ingestInterval
         self.collectionURL = 'https://paleobiodb.org/data1.2/colls/list.csv?all_records&show=full&colls_modified_after=' + ingestInterval
         self.referenceURL = 'https://paleobiodb.org/data1.2/refs/list.csv?all_records&show=both&refs_modified_after=' + ingestInterval
         self.recordCountURL = 'https://paleobiodb.org/data1.2/occs/list.json?all_records&rowcount&limit=1'
+        if fullRefresh:
+            self.occurrenceURL = 'https://paleobiodb.org/data1.2/occs/list.csv?all_records&show=full'
+	    self.collectionURL = 'https://paleobiodb.org/data1.2/colls/list.csv?all_records&show=full'
+            self.referenceURL = 'https://paleobiodb.org/data1.2/refs/list.csv?all_records&show=both'
+	
         self.collectionCountURL = 'https://paleobiodb.org/data1.2/colls/single.json?coll_id='
         self.occurrenceDownloadURL = 'https://paleobiodb.org/data1.2/occs/list.json?coll_id='
         self.ingestLog = ingestLog
