@@ -40,6 +40,10 @@ def getMd5Hash(dict):
     md5 = hashlib.md5(json.dumps(dict, sort_keys=True)).hexdigest()
     return md5
 
+# This detects if two records in Elastic are the same
+# It does so by removing any fields that are globally unique and then
+# comparing all of the data fields
+# If the calculated hash is the same they are the same
 def compareDocuments(source, sentinel):
     for doc in [source, sentinel]:
         for field in ['_id', '@version', '@timestamp', 'type', 'host']:
@@ -57,6 +61,7 @@ def compareDocuments(source, sentinel):
 
     return False
 
+# This provides the iDigBio spreadsheet standardization methods
 def idbCleanSpreadsheet(occurrenceFile):
     tempCSV = open("occurrence_0.csv", "wb")
     csv.field_size_limit(sys.maxsize)
@@ -68,20 +73,26 @@ def idbCleanSpreadsheet(occurrenceFile):
         header = True
         for row in reader:
             if header:
+                # Get the column numbers for important columns that we'll be parsing
                 geoCell = row.index('idigbio:geoPoint')
                 flagCell = row.index('idigbio:flags')
                 idigbioDate = row.index('idigbio:eventDate')
                 modifiedDate = row.index('idigbio:dateModified')
                 dwcDate = row.index('dwc:eventDate')
+                # Add rows to store split dates
                 row.append("dwc:eventDateEarly")
                 row.append("dwc:eventDateLate")
                 header = False
-                #writer.writerow(row)
+                writer.writerow(row)
                 continue
+            # Convert JSON georeference to plain lat,lng pair that can be
+            # understood by Elastic's georef index
             if row[geoCell]:
                 tmpGeo = json.loads(row[geoCell])
                 geoStr = str(tmpGeo['lat']) + ',' + str(tmpGeo['lon'])
                 row[geoCell] = geoStr
+            # These two take datetime strings and extract only dates, which is what
+            # we care about
             if row[idigbioDate]:
                 onlyDateMatch = re.match("([0-9\-]+)T.*", row[idigbioDate])
                 if onlyDateMatch:
@@ -92,6 +103,7 @@ def idbCleanSpreadsheet(occurrenceFile):
                 if modDateMatch:
                     modDate = modDateMatch.group(1)
                     row[modifiedDate] = modDate
+            # Split the single field date into two separate fields
             if row[dwcDate]:
                 if re.search("-[0-9]{1}", row[dwcDate]):
                     newDate = re.sub(r"-([0-9]{1})", r"-0\1", row[dwcDate])
@@ -107,15 +119,17 @@ def idbCleanSpreadsheet(occurrenceFile):
             if row[flagCell] is None:
             	row[flagCell] = []
             rowCount += 1
+            print row
             writer.writerow(row)
             if rowCount % 5000000 == 0:
                 tempCSV.close()
                 fileCount += 1
                 tempCSV = open("occurrence_" + str(fileCount) + ".csv", "wb")
                 writer = csv.writer(tempCSV)
-            	
+
     tempCSV.close()
 
+# This provides the PBDB data standardization methods
 def pbdbCleanGeoPoints(occurrenceFile):
     tempCSV = open("tmp_pbdb.csv", "wb")
     csv.field_size_limit(sys.maxsize)
@@ -126,12 +140,17 @@ def pbdbCleanGeoPoints(occurrenceFile):
         for row in reader:
             if header:
             	rowLen = len(row)
+                # Get column numbers for important roles
                 latCell = row.index('lat')
                 lngCell = row.index('lng')
                 pLatCell = row.index('paleolat')
                 pLngCell = row.index('paleolng')
+                # For PBDB we will be merging some fields
                 row.append('geoPoint')
                 row.append('paleoGeoPoint')
+                # Some field names include .0., which Logstash can't handle
+                # Replace them with a simple dash, which is what users expect
+                # anyway
                 for cell in row:
 
                 	if '.0.' in cell:
@@ -141,10 +160,12 @@ def pbdbCleanGeoPoints(occurrenceFile):
                 print(row)
                 header = False
             else:
+                # combine lat, lng into a single value
             	if row[latCell] and row[lngCell]:
             	    row.append(str(row[latCell]) + ',' + str(row[lngCell]))
             	else:
             		row.append('')
+                # combine paleo lat, lng
             	if row[pLatCell] and row[pLngCell]:
                 	row.append(str(row[pLatCell]) + ',' + str(row[pLngCell]))
                 else:
@@ -153,6 +174,8 @@ def pbdbCleanGeoPoints(occurrenceFile):
     shutil.move("tmp_pbdb.csv", occurrenceFile)
     tempCSV.close()
 
+# This deduplicate header names
+# It will just return any duplicates that are found
 def csvDuplicateHeaderCheck(csvFile):
     occurrenceHeader = pd.read_csv(csvFile, sep=",", nrows=1)
     occurrenceHeadList = list(occurrenceHeader.columns.values)
@@ -169,6 +192,7 @@ def csvDuplicateHeaderCheck(csvFile):
             duplicateHeaders.append(header)
     return duplicateHeaders
 
+# This will rename any duplicate headers that were found
 def csvRenameDuplicateHeaders(csvFileName, duplicateHeaders):
     logger.info("Removing duplicate header values from " + csvFileName)
     tempfile = NamedTemporaryFile(delete=False)

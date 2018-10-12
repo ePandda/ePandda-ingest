@@ -1,5 +1,6 @@
 #
-# Mongo Class for handling data import from ingesters
+# Class for handling data import from ePandda ingesters
+# for mongoDB and ElasticSearch
 # by Mike Benowitz
 #
 
@@ -53,29 +54,73 @@ class multiConnect:
             self.logger.error("Couldn't close mongo connection")
             return False
 
-    def checkIDBCollectionStatus(self, collectionKey, modifiedDate):
-        # Status flags
-        # new = This is a new collection
-        # modified = This collection has been modified since the last ingest
-        # static = This collection has not changed since last ingest
-        collCollection = self.idigbio_db.collectionStatus
-
-        collStatus = collCollection.find_one({'collection': collectionKey})
-        if not collStatus:
-            return 'new'
-        elif collStatus['modifiedDate'] != modifiedDate:
-            return 'modified'
-        else:
-            return 'static'
-
+    #
+    # iDigBio Import Methods
+    # The two methods below utilize a subcall to logstash to import the records
+    # as retrieved from the iDigBio API
+    # These methods are called from the idigbio class and perform the function
+    # of inserting parsed data into Elastic
+    #
     def iDBFullImport(self, occurrenceFile, mediaFile, collectionKey, collectionModified):
         self.logger.debug("Formating GeoPoints for " + occurrenceFile)
+        # This helper function preforms several methods
+        # 1) It standardizes date and georeference fields, parsing them into
+        #    formats that Elastic can understand and be queried on
+        # 2) It parses JSON data and gives Logstash understandable objects
+        # 3) It breaks the imported files into a series, which helps with
+        #    overall processing speed
         ingestHelpers.idbCleanSpreadsheet(occurrenceFile)
+        # Once parsed, import all the resulting files, which are stored in the
+        # current directory
         for file in os.listdir('.'):
             if fnmatch.fnmatch(file, 'occurrence_*.csv'):
                 self.logger.debug("Importing collection " + file + "into Elastic")
                 tmpIN = open(file)
-                importCall = Popen([self.logstash, '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash', '--pipeline.unsafe_shutdown'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+                # This is a subcall to logstash
+                # the logstash .conf file is stored in this directory and contains
+                # instructions on how to import the files. It should be kept
+                # standard but it can be changed in the future to adapt to
+                # possible schema changes from iDigBio (unlikely, but possible)
+                importCall = Popen([self.logstash, '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+                out, err = importCall.communicate()
+                if importCall.returncode != 0:
+                    self.logger.error("elastic import failed with error: " + err)
+                    return False
+                else:
+                    self.logger.info("elastic import success! " + out)
+                os.remove(file)
+        # If this dataset included a media file, import that as well, using the
+        # same style but a different logstash configuration
+        if mediaFile:
+            tmpIN = open(mediaFile)
+            importCall = Popen([self.logstash, '-f', 'idigbio_media_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+            out, err = importCall.communicate()
+            if importCall.returncode != 0:
+                self.logger.error("elastic media import failed with error: " + err)
+                return False
+            else:
+                self.logger.info("elastic media import success! " + out)
+
+        # This section stores the status and result of the ingest call in mongodb
+        collCollection = self.idigbio_db.collectionStatus
+        updateStatus = collCollection.update({'collection': collectionKey}, {'$set': {'collection': collectionKey, 'modifiedDate': collectionModified}}, upsert=True)
+        if collCollection:
+            self.logger.debug("Added/updated collection entry in collectionStatus for " + collectionKey)
+        else:
+            self.logger.warning("Failed to update this record in collectionStatus: " + collectionKey)
+        return True
+
+    # This functions the same as above
+    # TODO Merge these two functions
+    def iDBPartialImport(self, occurrenceFile, mediaFile, collectionKey, collectionModified, fileType):
+        self.logger.debug("Formating GeoPoints for " + occurrenceFile)
+        ingestHelpers.idbCleanSpreadsheet(occurrenceFile)
+        self.logger.debug("Importing collection " + occurrenceFile + " into Elastic")
+        for file in os.listdir('.'):
+            if fnmatch.fnmatch(file, 'occurrence_*.csv'):
+                self.logger.debug("Importing collection " + file + "into Elastic")
+                tmpIN = open(occurrenceFile)
+                importCall = Popen([self.logstash, '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
                 out, err = importCall.communicate()
                 if importCall.returncode != 0:
                     self.logger.error("elastic import failed with error: " + err)
@@ -84,6 +129,7 @@ class multiConnect:
                     self.logger.info("elastic import success! " + out)
                 os.remove(file)
         if mediaFile:
+            self.logger.debug("Importing media for collection " + occurrenceFile + " into Elastic")
             tmpIN = open(mediaFile)
             importCall = Popen([self.logstash, '-f', 'idigbio_media_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
             out, err = importCall.communicate()
@@ -101,40 +147,12 @@ class multiConnect:
         return True
 
 
-    def iDBPartialImport(self, occurrenceFile, mediaFile, collectionKey, collectionModified, fileType):
-        self.logger.debug("Formating GeoPoints for " + occurrenceFile)
-        ingestHelpers.idbCleanSpreadsheet(occurrenceFile)
-        self.logger.debug("Importing collection " + occurrenceFile + " into Elastic")
-        for file in os.listdir('.'):
-            if fnmatch.fnmatch(file, 'occurrence_*.csv'):
-                self.logger.debug("Importing collection " + file + "into Elastic")
-                tmpIN = open(occurrenceFile)
-                importCall = Popen([self.logstash, '-f', 'idigbio_logstash.conf', '--path.settings', '/etc/logstash', '--pipeline.unsafe_shutdown'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
-                out, err = importCall.communicate()
-                if importCall.returncode != 0:
-                    self.logger.error("elastic import failed with error: " + err)
-                    return False
-                else:
-                    self.logger.info("elastic import success! " + out)
-                os.remove(file)
-        if mediaFile:
-            self.logger.debug("Importing media for collection " + occurrenceFile + " into Elastic")
-            tmpIN = open(mediaFile)
-            importCall = Popen([self.logstash, '-f', 'idigbio_media_logstash.conf', '--path.settings', '/etc/logstash', '--pipeline.unsafe_shutdown'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
-            out, err = importCall.communicate()
-            if importCall.returncode != 0:
-                self.logger.error("elastic media import failed with error: " + err)
-                return False
-            else:
-                self.logger.info("elastic media import success! " + out)
-        collCollection = self.idigbio_db.collectionStatus
-        updateStatus = collCollection.update({'collection': collectionKey}, {'$set': {'collection': collectionKey, 'modifiedDate': collectionModified}}, upsert=True)
-        if collCollection:
-            self.logger.debug("Added/updated collection entry in collectionStatus for " + collectionKey)
-        else:
-            self.logger.warning("Failed to update this record in collectionStatus: " + collectionKey)
-        return True
-
+    # The PaleobioDB ingest process produces three distinct files that are used
+    # to process into Elastic
+    # 1) Occurrences
+    # 2) Collections
+    # 3) References
+    # All three are processed here and temporarily stored in mongo for further processing
     def pbdbIngestTmpCollections(self, csvFiles):
         for csvFile in csvFiles:
             # Checking for duplicate headers
@@ -143,6 +161,7 @@ class multiConnect:
                 self.logger.debug(duplicateHeaders)
                 renameStatus = ingestHelpers.csvRenameDuplicateHeaders(csvFile, duplicateHeaders)
             collectionName = 'tmp_' + csvFile[:-4]
+            # This creates a general object for the mongo import settings
             importArgs = ['mongoimport', '--host', self.config['mongodb_host'], '-u', self.config['mongodb_user'], '-p', self.config['mongodb_password'], '--authenticationDatabase', 'admin', '-d', self.config['pbdb_db'], '-c', collectionName, '--numInsertionWorkers', '4', '--type', 'csv', '--file', csvFile, '--headerline']
             if collectionName == 'tmp_occurrence':
                 importArgs.append('--drop')
@@ -151,6 +170,7 @@ class multiConnect:
                 importArgs.extend(['--mode', 'upsert', '--upsertFields', 'reference_no'])
             elif collectionName == 'tmp_collection':
                 importArgs.extend(['--mode', 'upsert', '--upsertFields', 'collection_no'])
+            # Make a subcall to the import process
             importCall = Popen(importArgs, stdin=PIPE, stdout=PIPE, stderr=PIPE)
             out, err = importCall.communicate()
             if importCall.returncode != 0:
@@ -160,6 +180,9 @@ class multiConnect:
                 self.logger.info("mongoimport success! " + out)
         return True
 
+    # Once we've created the temporary mongo collections, we utilize them to
+    # merge the data into the occurrences, which is how the data will be stored
+    # in Elastic
     def pbdbMergeTmpCollections(self, occurrence, collection, reference):
         self.logger.debug("Getting unique collection_no values from occurrences")
         occurrenceCollection = self.pbdb_db[occurrence]
@@ -196,6 +219,8 @@ class multiConnect:
 
         return True
 
+    # Once the merged occurrence collection is created, it is exported to a CSV
+    # file and from there imported into Elastic using logstash
     def pbdbMergeNewData(self, tmp_occurrence):
         self.logger.info("Merging new PaleoBio data")
 
@@ -212,7 +237,7 @@ class multiConnect:
         ingestHelpers.pbdbCleanGeoPoints(tmp_occurrence)
         self.logger.debug("Importing collection " + tmp_occurrence + " into Elastic")
         tmpIN = open(tmp_occurrence)
-        importCall = Popen([self.logstash, '-f', 'pbdb_logstash.conf', '--path.settings', '/etc/logstash', '--pipeline.unsafe_shutdown'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
+        importCall = Popen([self.logstash, '-f', 'pbdb_logstash.conf', '--path.settings', '/etc/logstash'], stdin=tmpIN, stdout=PIPE, stderr=PIPE)
         out, err = importCall.communicate()
         if importCall.returncode != 0:
             self.logger.error("elasticsearch_loader failed with error: " + err)
@@ -222,6 +247,8 @@ class multiConnect:
             return True
         return True
 
+    # Performs a simple Elastic query to get the number of PBDB collections
+    # currently in the system
     def getCollectionCounts(self, docType, collectionField):
         setAggregation = {
             "size": 0,
@@ -251,6 +278,8 @@ class multiConnect:
             collectionCounts.append((recordSet, setCount))
         return collectionCounts
 
+    # This accepts a set of records that have been deleted in one of the sources
+    # It searches for them in ePandda, and if it finds them, it removes them
     def checkAndDeleteRecords(self, groupID, recordIDs, idField, docType):
         resultTop = totalResults = offset = 0
         epanddaIDs = set()
@@ -283,6 +312,9 @@ class multiConnect:
         else:
             self.logger.debug("Didn't find any duplicate specimens. Check recordset " + setID + " in " + docType)
 
+    #
+    # These methods add basic metrics for import runs to mongo
+    #
     def createIngestLog(self, sources):
         ingests = self.ingestLog[self.config['ingest_collection']]
         ingestRecord = ingests.insert_one({'ingestDate': datetime.datetime.utcnow(), 'ingestSources': sources, 'status': 'STARTED'})
@@ -327,12 +359,22 @@ class multiConnect:
             self.logger.warning("Could not add total count to ingest log!")
             return False
 
+    #
+    # SENTINELS
+    # These methods create "sentinel" records
+    # that are used to verify that nothing seriously wonky has happened with the
+    # database
+    #
+
+    # Get the current count of sentinels
     def getSentinelCount(self, source):
         sourceDB = self.client[self.config[source+'_db']]
         sentinelCollection = sourceDB['sentinels']
         totalCount = sentinelCollection.find({}).count()
         return totalCount
 
+    # Check to see if we need more sentinels and if so,
+    # select some new records at random to add to the sentinal collection
     def addSentinels(self, source, totalCount, existingSentinels):
         # Calculating no. of sentinels to add
         sourceDB = self.client[self.config[source+'_db']]
@@ -344,7 +386,8 @@ class multiConnect:
 
         sentinelCount = 0
         createdSentinels = []
-        bulk = sentinelCollection.initialize_unordered_bulk_op()
+        bulk = sentinelCollection.initialize_unordered_bulk_op() # Create mongo insert method
+        # The following creates a query for 25 randomly sorted Elastic records
         randomSentinelQuery = {
             "size": 25,
             "query": {
@@ -358,12 +401,14 @@ class multiConnect:
         while sentinelLoop:
             addSentinels = self.esClient.search(body=randomSentinelQuery, index=source, doc_type=source)
             for newSentinel in addSentinels['hits']['hits']:
+                # Skip on the low chance we've selected a sentinel that already exists
                 if newSentinel['_id'] in createdSentinels:
                     self.logger.debug("Sentinel already added, skipping")
                     continue
                 bulk.find({'_id': newSentinel['_id']}).upsert().update({'$set': newSentinel['_source']})
                 createdSentinels.append(newSentinel['_id'])
                 sentinelCount += 1
+                # Perform a mongo bulk insert
                 if sentinelCount % 250 == 0:
                     try:
                         bulk_results = bulk.execute()
@@ -396,11 +441,14 @@ class multiConnect:
         else:
             return False
 
+    # Verify the existence of a sufficient number of sentinels as defined in the
+    # configuration settings
     def verifySentinels(self, source):
         sourceDB = self.client[self.config[source+'_db']]
         sourceCollection = sourceDB[self.config[source+'_coll']]
         sentinelCollection = sourceDB['sentinels']
 
+        # Retrieve all sentinel records from Mongo
         sentinels = sentinelCollection.find({})
         self.logger.info("Checking sentinels for " + source)
         modifiedSentinels = staticSentinels = missingSentinels = sentinelBatch = sentinelCount = 0
@@ -409,6 +457,8 @@ class multiConnect:
                 sentinelBatch += 1
                 self.logger.info("Processing Sentinel Batch " + str(sentinelBatch))
             sentinelCount += 1
+
+            # Create a query for a single sentinel in Elastic
             sentinelQuery = {
                 "term":{
                     "size": 1,
@@ -417,10 +467,13 @@ class multiConnect:
             }
             sourceRecords = self.esClient.search(index=source, body=sentinelQuery)
             sourceRecord = sourceRecords['hits']['hits'][0]['_source']
+            # Verify that record exists
             if not sourceRecord:
                 missingSentinels += 1
                 self.logger.warning("document " + str(sentinel['_id']) + " is missing")
                 continue
+            # Check if the data changed. If all of our sentinel records changed
+            # then something almost certainly went wrong
             recordChanged = ingestHelpers.compareDocuments(sourceRecord, sentinel)
             if recordChanged is True:
                 modifiedSentinels += 1
@@ -432,6 +485,8 @@ class multiConnect:
         self.logger.info(str(staticSentinels) + " Sentinels Unchanged / " + str(modifiedSentinels) + " Sentinels Modified / " + str(missingSentinels) + " Sentinels Missing")
         return staticSentinels, modifiedSentinels, missingSentinels
 
+    # This method, not generally used, will scan Elastic for duplicate records
+    # and remove them
     def deleteDuplicates(self, source):
         sourceDB = self.client[self.config[source+'_db']]
         sourceCollection = sourceDB[self.config[source+'_coll']]

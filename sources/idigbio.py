@@ -78,11 +78,6 @@ class idigbio:
         # open a mongo connection
         multiConn = multiConnect.multiConnect()
         collectionName = 'iDigBio_ingest_' + str(refreshFrom)
-        # Check if the collection has already been updated for this date
-        #refreshStatus = multiConn.checkIDBCollectionStatus(collectionName, refreshFrom)
-        #if refreshStatus == 'static':
-        #    self.logger.info("An ingest has already been run from this date")
-        #    return False
 
         # Query the iDigBio API for modified records
         startDate = self.refreshDate
@@ -90,6 +85,11 @@ class idigbio:
         if startDate < (datetime.today() - timedelta(days=7)):
         	endDate = startDate + timedelta(days=7)
         while(startDate < datetime.today()):
+            # This is the format of iDigBios "record query" API call
+            # It takes a specially formated JSON object and returns a URL
+            # That URL is a JSON document that describes the download request
+            # Once that request is completed it changes its content and provides
+            # a download link. See the idbAPIDownload method for more details
             dateChunkURL = 'https://api.idigbio.org/v2/download/?rq={"datemodified":{"type":"range","gte":"' + startDate.strftime('%Y-%m-%d') + '", "lte":"'+endDate.strftime('%Y-%m-%d')+'"}}'
             occurrenceFile, mediaFile, collectionKey = self.idbAPIDownload(dateChunkURL)
             if not occurrenceFile:
@@ -105,13 +105,14 @@ class idigbio:
                 self.logger.error("Could not log record count. Check validity carefully!")
 
 			# Download and ingest the created iDigBio file
+            # See multiConnect.py for further information on this
             ingestResult = multiConn.iDBPartialImport(occurrenceFile, mediaFile, collectionName, self.refreshFrom, 'csv')
             if ingestResult is False:
                 self.logger.error("There were at least some errors during import of " + collectionKey)
                 print "Imported with at least some errors"
             else:
                 self.logger.info("Updated records in " + collectionKey)
-            
+
             self.logger.debug("Deleting " + collectionKey)
             os.remove(collectionKey)
             shutil.rmtree(collectionKey[:-4])
@@ -119,7 +120,7 @@ class idigbio:
             endDate = endDate + timedelta(days=8)
             if(endDate > datetime.today()):
                 endDate = datetime.today()
-			
+
         return True
 
     def runFullIngest(self):
@@ -202,10 +203,10 @@ class idigbio:
             os.remove(collectionKey)
             shutil.rmtree(collectionDir)
 
-        # Run partial import for updates since most recent dump
-        today = datetime.today()
-        dayCount = (today - mostRecentDumpDate).days
-        partialResult = self.runPartialIngest(dayCount, mostRecentDumpDate)
+            # Run partial import for updates since most recent dump
+            today = datetime.today()
+            dayCount = (today - mostRecentDumpDate).days
+            partialResult = self.runPartialIngest(dayCount, mostRecentDumpDate)
 
         return True
 
@@ -254,6 +255,12 @@ class idigbio:
                 return recordStatus["status_url"]
         return False
 
+    # This method waits for the iDigBio download request to resolve
+    # Once it does it returns the download URL
+    # It will retry a fixed number of times if the connection is lost, but if that
+    # persists it will exit the script with an error code
+    # That generall does not happen, though this method can run for 30+ minutes
+    # for large download requests
     def getIDBDownloadURL(self, statusURL):
         self.logger.info("Getting iDigBio download from: " + statusURL)
         while True:
@@ -289,8 +296,8 @@ class idigbio:
 
         return False
 
-
-
+    # Once the download url is recieved, this function downloads the ZIP file
+    # available there, unzips it and stores the results
     def downloadCollection(self, collectionRoot, collectionKey):
         self.logger.debug("Downloading collection " + collectionKey)
         if os.path.isfile(collectionKey):
@@ -304,22 +311,28 @@ class idigbio:
 				zWrite.write(chunk)
 		zWrite.close()
 		zf = open(collectionKey, 'rb')
-	self.logger.debug("Download Complete. Unziping source file " + collectionKey)	
+	self.logger.debug("Download Complete. Unziping source file " + collectionKey)
 	# Unzip the zip file!
 	collectionDir = collectionKey[:-4]
 	zFile = zipfile.ZipFile(zf)
-	zFile.extractall(collectionDir)	
-	
+	zFile.extractall(collectionDir)
+
 	zFile.close()
 	zf.close()
 
         return collectionDir
 
+    # This verifies that that contents of the downloaded ZIP file are what we
+    # expect: an occurrence file and perhaps a multimedia fileself.
+    # This function also scans the occurrence file for well-formed-ness. If the
+    # source data is faulty in some way that renders it not useful for ePandda,
+    # this method will reject it
     def checkCollection(self, collectionDir):
         self.logger.debug("Checking collection directory" + collectionDir)
         dirContents = os.listdir(collectionDir)
         validFile = False
         mediaFile = None
+        # Verify ZIP file contents
         for collFile in dirContents:
             if collFile in ['occurrence.txt', 'occurrence.csv']:
             	if validFile == False:
@@ -333,9 +346,11 @@ class idigbio:
         if validFile is False:
             self.logger.error("No occurrence file found. Check this collection for valid content: " + collectionDir)
             return None
+        # If just the media file is missing, let us know, but its not necessairily an issue
         if mediaFile is None:
         	self.logger.error("No multimedia file found. No immediate issue but verify that no media exists")
-        	
+
+        # Get the headers of the CSV file and confirm that the necessary fields are present
         occurrenceHeader = pd.read_csv(occurrenceFile, sep=",", nrows=1)
         occurrenceHeadList = list(occurrenceHeader.columns.values)
         headerChecklist = ['idigbio:uuid', 'idigbio:institutionName', 'dwc:genus', 'dwc:specificEpithet', 'dwc:country', 'dwc:stateProvince', 'dwc:earliestAgeOrLowestStage', 'dwc:latestAgeOrHighestStage', 'dwc:formation']
@@ -344,9 +359,11 @@ class idigbio:
                 self.logger.error(occurrenceFile + " is not a valid CSV or TXT. Check source collection for validity")
                 self.logger.debug("Header list for invalid file: " + str(occurrenceHeadList))
                 return None
+        # Deduplicate any repeated headers as duplicate field names will crash Logstash
         duplicateHeaders = ingestHelpers.csvDuplicateHeaderCheck(occurrenceFile)
         if duplicateHeaders:
             ingestHelpers.csvRenameDuplicateHeaders(occurrenceFile, duplicateHeaders)
+        # Perform a simpler, but similar check on the media records
         if mediaFile:
         	mediaHeader = pd.read_csv(mediaFile, sep=",", nrows=1)
         	mediaHeadList = list(mediaHeader.columns.values)
@@ -355,7 +372,7 @@ class idigbio:
         		if mCheck not in mediaHeadList:
         			self.logger.error(mediaFile + " is not a valid CSV or TXT multimedia file. Check Source for validity")
         			mediaFile = None
-        
+
         return occurrenceFile, mediaFile
 
     def getRecordCount(self):
@@ -368,6 +385,7 @@ class idigbio:
                 return recordCount
         return None
 
+    
     def deleteCheck(self):
         self.logger.info("Checking for deleted records")
 
